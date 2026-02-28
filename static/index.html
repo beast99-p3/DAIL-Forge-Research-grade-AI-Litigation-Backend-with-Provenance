@@ -143,12 +143,33 @@ td.wrap{white-space:normal;max-width:300px}
 .empty-state{text-align:center;padding:3rem;color:var(--text2)}
 .empty-state .icon{font-size:2.5rem;margin-bottom:.5rem}
 
+/* ── Terminal ───────────────────────────────────────────────────── */
+.terminal-container{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);height:calc(100vh - 180px);display:flex;flex-direction:column}
+.terminal-output{flex:1;padding:1rem;overflow-y:auto;font-family:var(--mono);font-size:.85rem;line-height:1.6;color:var(--text)}
+.terminal-line{margin-bottom:.5rem}
+.terminal-prompt{color:var(--accent);font-weight:600}
+.terminal-result{margin-left:1rem;color:var(--text2)}
+.terminal-result.success{color:var(--green)}
+.terminal-result.error{color:var(--red)}
+.terminal-result table{font-family:var(--mono);font-size:.8rem;margin-top:.5rem}
+.terminal-result .result-header{color:var(--accent2);font-weight:600;margin-top:.75rem;margin-bottom:.25rem}
+.terminal-input-row{display:flex;align-items:center;gap:.5rem;padding:.75rem 1rem;border-top:1px solid var(--border);background:var(--bg3)}
+.terminal-input-row .prompt-char{color:var(--accent);font-family:var(--mono);font-weight:700}
+.terminal-input{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--mono);font-size:.9rem;outline:none}
+.terminal-help{background:var(--bg3);padding:1rem;margin-bottom:1rem;border-radius:8px;font-family:var(--mono);font-size:.8rem;line-height:1.8}
+.terminal-help h4{color:var(--accent);margin-bottom:.5rem}
+.terminal-help .cmd{color:var(--green);font-weight:600}
+.terminal-help .params{color:var(--text2)}
+.terminal-export-btn{background:var(--green);color:#fff;border:none;padding:.25rem .5rem;border-radius:4px;font-size:.75rem;margin-left:.5rem;cursor:pointer}
+.terminal-export-btn:hover{opacity:.85}
+
 /* ── Responsive ─────────────────────────────────────────────────── */
 @media(max-width:768px){
   .filters{flex-direction:column}
   .stats-row{grid-template-columns:repeat(2,1fr)}
   .detail-meta{grid-template-columns:1fr}
   header nav button span.label{display:none}
+  .terminal-container{height:calc(100vh - 150px)}
 }
 </style>
 </head>
@@ -160,6 +181,7 @@ td.wrap{white-space:normal;max-width:300px}
   <div class="logo">⚖️ <span>DAIL Forge</span></div>
   <nav id="nav">
     <button class="active" data-page="dashboard">📊 <span class="label">Dashboard</span></button>
+    <button data-page="terminal">💻 <span class="label">Terminal</span></button>
     <button data-page="cases">📁 <span class="label">Cases</span></button>
     <button data-page="provenance">🔗 <span class="label">Provenance</span></button>
     <button data-page="curate">✏️ <span class="label">Curate</span></button>
@@ -206,6 +228,42 @@ td.wrap{white-space:normal;max-width:300px}
   <div class="card" style="margin-top:1rem">
     <h3>🏷️ Tag Distribution</h3>
     <div id="tag-distribution" style="margin-top:.75rem"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+  </div>
+</div>
+
+<!-- ─── Research Terminal ─────────────────────────────────────── -->
+<div id="page-terminal" class="page">
+  <h2 style="margin-bottom:1rem;color:#fff">💻 Research Terminal</h2>
+  <p style="color:var(--text2);margin-bottom:1rem">Query the database using natural language commands. Type <code style="color:var(--accent)">help</code> for available commands.</p>
+  
+  <div class="terminal-container">
+    <div class="terminal-output" id="terminal-output">
+      <div class="terminal-line">
+        <span class="terminal-prompt">DAIL Forge Terminal v1.0</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-result">Type '<span class="cmd" style="color:var(--green);font-weight:600">help</span>' to see available commands, or try natural language queries!</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-result">Examples:</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-result" style="margin-left:2rem">• search cases about privacy in California</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-result" style="margin-left:2rem">• show cases filed after 2022</span>
+      </div>
+      <div class="terminal-line">
+        <span class="terminal-result" style="margin-left:2rem">• list cases with status active</span>
+      </div>
+      <div class="terminal-line" style="margin-bottom:1rem">
+        <span class="terminal-result" style="margin-left:2rem">• export last results as CSV</span>
+      </div>
+    </div>
+    <div class="terminal-input-row">
+      <span class="prompt-char">$</span>
+      <input type="text" class="terminal-input" id="terminal-input" placeholder="Enter your query..." autocomplete="off">
+    </div>
   </div>
 </div>
 
@@ -889,6 +947,319 @@ async function submitCitation() {
   } catch (e) {
     toast('Error: ' + e.message, 'error');
   }
+}
+
+// ── Terminal ─────────────────────────────────────────────────────
+let terminalHistory = [];
+let terminalHistoryIndex = -1;
+let lastQueryResults = null;
+let lastQueryParams = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+  const terminalInput = document.getElementById('terminal-input');
+  if (terminalInput) {
+    terminalInput.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cmd = terminalInput.value.trim();
+        if (cmd) {
+          terminalHistory.push(cmd);
+          terminalHistoryIndex = terminalHistory.length;
+          await executeCommand(cmd);
+          terminalInput.value = '';
+        }
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (terminalHistory.length && terminalHistoryIndex > 0) {
+          terminalHistoryIndex--;
+          terminalInput.value = terminalHistory[terminalHistoryIndex];
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (terminalHistoryIndex < terminalHistory.length - 1) {
+          terminalHistoryIndex++;
+          terminalInput.value = terminalHistory[terminalHistoryIndex];
+        } else {
+          terminalHistoryIndex = terminalHistory.length;
+          terminalInput.value = '';
+        }
+      }
+    });
+  }
+});
+
+function terminalPrint(content, className = '') {
+  const output = document.getElementById('terminal-output');
+  const line = document.createElement('div');
+  line.className = 'terminal-line';
+  line.innerHTML = content;
+  if (className) {
+    const result = document.createElement('div');
+    result.className = `terminal-result ${className}`;
+    result.innerHTML = content;
+    line.innerHTML = '';
+    line.appendChild(result);
+  }
+  output.appendChild(line);
+  output.scrollTop = output.scrollHeight;
+}
+
+function clearTerminal() {
+  document.getElementById('terminal-output').innerHTML = '';
+}
+
+async function executeCommand(input) {
+  terminalPrint(`<span class="terminal-prompt">$ ${escHtml(input)}</span>`);
+  
+  const cmd = input.toLowerCase().trim();
+  
+  // Help command
+  if (cmd === 'help' || cmd === '?') {
+    terminalPrint(`
+      <div class="result-header">Available Commands:</div>
+      <div style="margin-left:1rem;line-height:2">
+        <strong style="color:var(--green)">help</strong> - Show this help message<br>
+        <strong style="color:var(--green)">clear</strong> - Clear the terminal<br>
+        <strong style="color:var(--green)">stats</strong> - Show database statistics<br>
+        <strong style="color:var(--green)">search [query]</strong> - Search cases with filters<br>
+        <strong style="color:var(--green)">show case [id]</strong> - Display full details for a specific case<br>
+        <strong style="color:var(--green)">export csv</strong> - Export last results as CSV<br>
+        <strong style="color:var(--green)">export json</strong> - Export last results as JSON<br>
+      </div>
+      <div class="result-header" style="margin-top:1rem">Natural Language Examples:</div>
+      <div style="margin-left:1rem;line-height:2;color:var(--text2)">
+        • <em>"cases about privacy in California"</em><br>
+        • <em>"show cases filed after 2022-01-01"</em><br>
+        • <em>"list cases with status active"</em><br>
+        • <em>"find cases about employment discrimination and AI"</em><br>
+        • <em>"cases in 9th circuit"</em><br>
+        • <em>"search facial recognition cases"</em><br>
+      </div>
+    `);
+    return;
+  }
+  
+  // Clear command
+  if (cmd === 'clear' || cmd === 'cls') {
+    clearTerminal();
+    return;
+  }
+  
+  // Stats command
+  if (cmd === 'stats' || cmd === 'status') {
+    try {
+      const stats = await api('/stats');
+      terminalPrint(`
+        <div class="result-header">Database Statistics:</div>
+        <div style="margin-left:1rem;line-height:1.8">
+          <span style="color:var(--accent)">Total Cases:</span> ${stats.cases} (${stats.real_cases} real, ${stats.stub_cases} stubs)<br>
+          <span style="color:var(--green)">Documents:</span> ${stats.documents}<br>
+          <span style="color:var(--orange)">Secondary Sources:</span> ${stats.secondary_sources}<br>
+          <span style="color:var(--accent2)">Dockets:</span> ${stats.dockets}<br>
+          <span style="color:var(--purple)">Tags:</span> ${stats.tags}<br>
+          <span style="color:var(--red)">Change Log Entries:</span> ${stats.change_log_entries}<br>
+        </div>
+      `, 'success');
+    } catch (e) {
+      terminalPrint(`Error: ${e.message}`, 'error');
+    }
+    return;
+  }
+  
+  // Show case command
+  const showCaseMatch = cmd.match(/^(?:show|get|view)\s+case\s+(\d+)$/);
+  if (showCaseMatch) {
+    const caseId = showCaseMatch[1];
+    try {
+      const c = await api(`/cases/${caseId}`);
+      const docs = await api(`/cases/${caseId}/documents`);
+      const sources = await api(`/cases/${caseId}/secondary-sources`);
+      
+      let html = `<div class="result-header">Case #${c.id} Details:</div>`;
+      html += `<div style="margin-left:1rem;line-height:1.8">`;
+      html += `<strong style="color:var(--accent)">Name:</strong> ${escHtml(c.case_name) || 'N/A'}<br>`;
+      html += `<strong>Case ID:</strong> ${escHtml(c.case_id) || 'N/A'}<br>`;
+      html += `<strong>Court:</strong> ${escHtml(c.court) || 'N/A'}<br>`;
+      html += `<strong>Filing Date:</strong> ${c.filing_date || 'N/A'}<br>`;
+      html += `<strong>Status:</strong> ${escHtml(c.case_status) || 'N/A'}<br>`;
+      html += `<strong>Outcome:</strong> ${escHtml(c.case_outcome) || 'N/A'}<br>`;
+      if (c.is_stub) html += `<strong style="color:var(--orange)">⚠️ Stub Record:</strong> Synthesised from FK references<br>`;
+      if (c.summary) html += `<strong>Summary:</strong> ${escHtml(c.summary)}<br>`;
+      if (c.tags && c.tags.length) {
+        html += `<strong>Tags:</strong> ${c.tags.map(t => tagHtml(t)).join(' ')}<br>`;
+      }
+      html += `</div>`;
+      
+      if (docs.length) {
+        html += `<div class="result-header" style="margin-top:.75rem">Documents (${docs.length}):</div>`;
+        html += `<ul style="margin-left:2rem;line-height:1.6">`;
+        docs.slice(0, 5).forEach(d => {
+          html += `<li>${escHtml(d.document_title) || 'Untitled'} ${d.url ? `(<a href="${d.url}" target="_blank" style="color:var(--accent2)">link</a>)` : ''}</li>`;
+        });
+        if (docs.length > 5) html += `<li><em>...and ${docs.length - 5} more</em></li>`;
+        html += `</ul>`;
+      }
+      
+      if (sources.length) {
+        html += `<div class="result-header" style="margin-top:.75rem">Secondary Sources (${sources.length}):</div>`;
+        html += `<ul style="margin-left:2rem;line-height:1.6">`;
+        sources.slice(0, 5).forEach(s => {
+          html += `<li>${escHtml(s.source_title) || 'Untitled'} ${s.url ? `(<a href="${s.url}" target="_blank" style="color:var(--accent2)">link</a>)` : ''}</li>`;
+        });
+        if (sources.length > 5) html += `<li><em>...and ${sources.length - 5} more</em></li>`;
+        html += `</ul>`;
+      }
+      
+      terminalPrint(html, 'success');
+    } catch (e) {
+      terminalPrint(`Error: ${e.message}`, 'error');
+    }
+    return;
+  }
+  
+  // Export commands
+  if (cmd === 'export csv' || cmd === 'download csv' || cmd === 'csv') {
+    if (!lastQueryParams) {
+      terminalPrint('No previous search results to export. Run a search first.', 'error');
+      return;
+    }
+    const csvUrl = `/export/cases.csv${qs(lastQueryParams)}`;
+    window.open(csvUrl, '_blank');
+    terminalPrint(`Downloading CSV export...`, 'success');
+    return;
+  }
+  
+  if (cmd === 'export json' || cmd === 'download json' || cmd === 'json') {
+    if (!lastQueryResults) {
+      terminalPrint('No previous search results to export. Run a search first.', 'error');
+      return;
+    }
+    const blob = new Blob([JSON.stringify(lastQueryResults, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dail-cases.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    terminalPrint(`Downloaded ${lastQueryResults.total} cases as JSON`, 'success');
+    return;
+  }
+  
+  // Natural language search parsing
+  await executeSearch(input);
+}
+
+async function executeSearch(query) {
+  const params = parseNaturalLanguageQuery(query);
+  
+  try {
+    const data = await api(`/cases${qs(params)}`);
+    lastQueryResults = data;
+    lastQueryParams = params;
+    
+    if (data.items.length === 0) {
+      terminalPrint('No cases found matching your query.', 'error');
+      return;
+    }
+    
+    let html = `<div class="result-header">Found ${data.total} case${data.total !== 1 ? 's' : ''} (showing ${data.items.length}):</div>`;
+    html += `<div style="margin-left:1rem;margin-top:.5rem">`;
+    
+    data.items.forEach((c, idx) => {
+      html += `<div style="border-bottom:1px solid var(--border);padding:.5rem 0;line-height:1.6">`;
+      html += `<strong style="color:var(--accent)">#${c.id}</strong> `;
+      html += `${escHtml(c.case_name) || escHtml(c.case_id) || 'Unnamed'}`;
+      if (c.court) html += ` <span style="color:var(--text2)">— ${escHtml(c.court)}</span>`;
+      if (c.filing_date) html += ` <span style="color:var(--text2)">(${c.filing_date})</span>`;
+      if (c.is_stub) html += ` <span style="color:var(--orange);font-size:.75rem">STUB</span>`;
+      html += `<br><span style="font-size:.8rem;color:var(--text2)">`;
+      html += `Status: ${escHtml(c.case_status) || 'N/A'}`;
+      if (c.case_outcome) html += ` | Outcome: ${escHtml(c.case_outcome)}`;
+      html += `</span>`;
+      if (c.tags && c.tags.length) {
+        html += `<br><span style="font-size:.75rem">${c.tags.slice(0, 3).map(t => tagHtml(t)).join(' ')}`;
+        if (c.tags.length > 3) html += ` <span style="color:var(--text2)">+${c.tags.length - 3} more</span>`;
+        html += `</span>`;
+      }
+      html += `</div>`;
+    });
+    
+    html += `</div>`;
+    html += `<div style="margin-top:.75rem;color:var(--text2);font-size:.85rem">`;
+    html += `Showing page ${data.page} of ${Math.ceil(data.total / data.page_size)}. `;
+    html += `<button class="terminal-export-btn" onclick="window.open('/export/cases.csv${qs(params).replace(/'/g, "\\'")}', '_blank')">⬇ Export CSV</button>`;
+    html += `</div>`;
+    
+    terminalPrint(html, 'success');
+  } catch (e) {
+    terminalPrint(`Error: ${e.message}`, 'error');
+  }
+}
+
+function parseNaturalLanguageQuery(query) {
+  const params = { page: 1, page_size: 10 };
+  const lower = query.toLowerCase();
+  
+  // Extract court
+  const courtMatch = lower.match(/(?:in|at|from)\s+([\w\s]+?court)/i);
+  if (courtMatch) params.court = courtMatch[1].trim();
+  
+  // Extract status
+  const statusMatch = lower.match(/(?:status|with status)\s+(?:is\s+)?(\w+)/i);
+  if (statusMatch) params.status = statusMatch[1];
+  
+  // Extract outcome
+  const outcomeMatch = lower.match(/(?:outcome|with outcome)\s+(?:is\s+)?(\w+)/i);
+  if (outcomeMatch) params.outcome = outcomeMatch[1];
+  
+  // Extract dates
+  const dateFromMatch = lower.match(/(?:after|from|since)\s+(\d{4}(?:-\d{2}-\d{2})?)/);
+  if (dateFromMatch) params.date_from = dateFromMatch[1].length === 4 ? `${dateFromMatch[1]}-01-01` : dateFromMatch[1];
+  
+  const dateToMatch = lower.match(/(?:before|until|to)\s+(\d{4}(?:-\d{2}-\d{2})?)/);
+  if (dateToMatch) params.date_to = dateToMatch[1].length === 4 ? `${dateToMatch[1]}-12-31` : dateToMatch[1];
+  
+  // Extract keyword
+  const keywordPatterns = [
+    /(?:about|regarding|concerning)\s+([^,\n]+?)(?:\s+(?:in|at|from|after|before|with)|$)/i,
+    /(?:search|find|show|list|get)\s+(?:cases?\s+)?(?:about\s+)?([^,\n]+?)(?:\s+(?:in|at|from|after|before|with)|$)/i,
+  ];
+  
+  for (const pattern of keywordPatterns) {
+    const match = query.match(pattern);
+    if (match && match[1]) {
+      const kw = match[1].trim();
+      if (kw && !kw.match(/^\d{4}/) && kw.length > 2) {
+        params.keyword = kw;
+        break;
+      }
+    }
+  }
+  
+  // Specific location keywords
+  if (/california|ca\b/i.test(lower)) params.court = 'California';
+  if (/9th circuit|ninth circuit/i.test(lower)) params.court = '9th';
+  if (/federal/i.test(lower)) params.court = 'federal';
+  if (/district/i.test(lower)) params.court = 'district';
+  
+  // Tag extraction
+  const tagPatterns = {
+    privacy: 'privacy',
+    'facial recognition': 'facial recognition',
+    'employment': 'employment',
+    'discrimination': 'discrimination',
+    'generative ai': 'generative',
+    'algorithm': 'algorithm',
+  };
+  
+  for (const [pattern, value] of Object.entries(tagPatterns)) {
+    if (lower.includes(pattern)) {
+      params.keyword = params.keyword || value;
+      break;
+    }
+  }
+  
+  return params;
 }
 
 // ── Init ─────────────────────────────────────────────────────────

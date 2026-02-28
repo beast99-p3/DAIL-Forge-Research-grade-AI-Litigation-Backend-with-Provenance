@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose up --build -d)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(docker compose down)",
+      "Bash(curl -s http://localhost:8000/stats)",
+      "Bash(python -m json.tool)"
+    ]
+  }
+}

@@ -53,7 +53,41 @@ class RawSchemaField(Base):
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
 
 
-# -- Data rows (from Document_Table / Secondary_Source_Coverage_Table)
+# -- Data rows (from Case_Table / Document_Table / Secondary_Source_Coverage_Table)
+
+class RawCase(Base):
+    """
+    Stores raw case rows from Case_Table.xlsx verbatim.
+
+    All columns are Text so the RAW layer preserves the original values
+    exactly as exported.  Multi-select tag columns (issue_list, etc.) are
+    split into normalised Tag / CaseTag rows during the transform step.
+    """
+    __tablename__ = "raw_case"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    case_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    case_name: Mapped[Optional[str]] = mapped_column(Text)
+    court: Mapped[Optional[str]] = mapped_column(Text)
+    filing_date: Mapped[Optional[str]] = mapped_column(Text)
+    closing_date: Mapped[Optional[str]] = mapped_column(Text)
+    case_status: Mapped[Optional[str]] = mapped_column(Text)
+    case_outcome: Mapped[Optional[str]] = mapped_column(Text)
+    case_type: Mapped[Optional[str]] = mapped_column(Text)
+    plaintiff: Mapped[Optional[str]] = mapped_column(Text)
+    defendant: Mapped[Optional[str]] = mapped_column(Text)
+    judge: Mapped[Optional[str]] = mapped_column(Text)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    issue_list: Mapped[Optional[str]] = mapped_column(Text)
+    area_list: Mapped[Optional[str]] = mapped_column(Text)
+    cause_list: Mapped[Optional[str]] = mapped_column(Text)
+    algorithm_list: Mapped[Optional[str]] = mapped_column(Text)
+    harm_list: Mapped[Optional[str]] = mapped_column(Text)
+    extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+
 
 class RawDocument(Base):
     __tablename__ = "raw_document"

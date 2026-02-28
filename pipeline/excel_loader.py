@@ -18,9 +18,9 @@ from typing import Any, Dict, List, Tuple, Type
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from db.models import RawDocument, RawSecondarySource, RawSchemaField
+from db.models import RawDocument, RawSecondarySource, RawSchemaField, RawCase
 from pipeline.column_map import (
-    DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES, SCHEMA_FIELD_ALIASES,
+    DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES, SCHEMA_FIELD_ALIASES, CASE_ALIASES,
     build_column_map, is_schema_metadata_file,
 )
 
@@ -168,12 +168,16 @@ DATA_DIR = Path("/mnt/data")
 
 # Files whose rows are *schema metadata* (column definitions).
 SCHEMA_FILE_CONFIG = [
-    {"glob": "Case_Table*.xlsx",   "label": "case_schema"},
     {"glob": "Docket_Table*.xlsx", "label": "docket_schema"},
 ]
 
 # Files whose rows are *actual data*.
 DATA_FILE_CONFIG = [
+    {
+        "glob": "Case_Table*.xlsx",
+        "model": RawCase,
+        "aliases": CASE_ALIASES,
+    },
     {
         "glob": "Document_Table*.xlsx",
         "model": RawDocument,
