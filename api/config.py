@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://dail:dail_secret@db:5432/dail_forge"
     DATABASE_URL_SYNC: str = "postgresql+psycopg2://dail:dail_secret@db:5432/dail_forge"
     CURATION_API_KEY: str = "dail-forge-secret-key-change-me"
+    # When False (default), pipeline integrity ERRORs abort startup.
+    # Set to True in dev/demo environments to allow a dirty DB to serve.
+    DAIL_ALLOW_DIRTY_STARTUP: bool = False
 
     class Config:
         env_file = ".env"

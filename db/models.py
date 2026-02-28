@@ -95,6 +95,9 @@ class Case(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     case_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    # Original surrogate key from the Excel export.  Stored for traceability but
+    # NOT used as the canonical identity (export ordering can change across releases).
+    legacy_case_number: Mapped[Optional[str]] = mapped_column(String(64), index=True)
     case_name: Mapped[Optional[str]] = mapped_column(Text)
     court: Mapped[Optional[str]] = mapped_column(Text, index=True)
     filing_date: Mapped[Optional[date]] = mapped_column(Date, index=True)
@@ -111,6 +114,9 @@ class Case(Base):
     # loaded from a real data file.  Curators should replace stubs with
     # real data when the full Case export becomes available.
     is_stub: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", index=True)
+    # SHA-256 fingerprint of the best-known stable identifiers (docket_number,
+    # court, caption, filing_date).  Enables safe merge/de-dup across imports.
+    case_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -136,6 +142,13 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     tag_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+    # Machine-stable slug (lowercase, underscored).  Stable across label edits.
+    slug: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    # False when the tag came from unmapped/unknown pipeline data —
+    # requires curator review before it enters the controlled vocabulary.
+    is_official: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    # Who created this tag: 'pipeline', 'curation', or any editor_id
+    source: Mapped[Optional[str]] = mapped_column(String(128))
 
     __table_args__ = (
         UniqueConstraint("tag_type", "value", name="uq_tag_type_value"),
@@ -252,6 +265,41 @@ class ChangeLog(Base):
     )
     citation_justification: Mapped[Optional[str]] = mapped_column(Text)  # required when citation_id is NULL
 
+    # Pipeline provenance
+    actor_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="human"
+    )  # 'human' | 'pipeline'
+    operation: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="update"
+    )  # 'create' | 'update' | 'delete' | 'merge'
+    run_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # FK to pipeline_runs.run_id
+
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     citation: Mapped[Optional["Citation"]] = relationship()
+
+
+class PipelineRun(Base):
+    """
+    Registry of every pipeline execution.
+
+    Enables:
+    - Full audit trail of bulk data loads
+    - Schema drift detection (compare file_hashes across runs)
+    - Linking change_log rows back to the run that created them
+    """
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="running")  # running|success|failed
+    data_dir: Mapped[Optional[str]] = mapped_column(Text)
+    # {filename: sha256_hex} — used for schema drift detection across runs
+    file_hashes: Mapped[Optional[dict]] = mapped_column(JSON)
+    raw_counts: Mapped[Optional[dict]] = mapped_column(JSON)
+    curated_counts: Mapped[Optional[dict]] = mapped_column(JSON)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    notes: Mapped[Optional[str]] = mapped_column(Text)

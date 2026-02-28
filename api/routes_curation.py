@@ -3,6 +3,7 @@ Curation API – restricted write endpoints with provenance enforcement.
 """
 
 from __future__ import annotations
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -13,7 +14,7 @@ from db.session import get_async_session
 from api.auth import require_api_key
 from api.schemas import (
     CasePatch, CaseOut, CaseTagCreate, TagOut,
-    CitationCreate, CitationOut, ChangeLogOut,
+    CitationCreate, CitationOut, ChangeLogOut, CasePromoteIn,
 )
 
 router = APIRouter(tags=["Curation (restricted write)"], dependencies=[Depends(require_api_key)])
@@ -49,6 +50,9 @@ async def _log_change(
     reason: str,
     citation_id=None,
     citation_justification=None,
+    actor_type: str = "human",
+    operation: str = "update",
+    run_id=None,
 ):
     entry = ChangeLog(
         table_name=table_name,
@@ -60,6 +64,9 @@ async def _log_change(
         reason=reason,
         citation_id=citation_id,
         citation_justification=citation_justification,
+        actor_type=actor_type,
+        operation=operation,
+        run_id=run_id,
     )
     session.add(entry)
     return entry
@@ -135,7 +142,14 @@ async def add_case_tag(
     )
     tag = result.scalar_one_or_none()
     if not tag:
-        tag = Tag(tag_type=body.tag_type, value=body.value)
+        slug = body.value.lower().strip().replace(" ", "_")
+        tag = Tag(
+            tag_type=body.tag_type,
+            value=body.value,
+            slug=slug,
+            is_official=body.is_official,
+            source=body.editor_id,
+        )
         session.add(tag)
         await session.flush()
 
@@ -157,6 +171,78 @@ async def add_case_tag(
 
     await session.commit()
     return tag
+
+
+# ── POST /cases/{case_id}/promote ─────────────────────────────────────
+
+@router.post("/cases/{case_id}/promote", response_model=CaseOut)
+async def promote_stub_case(
+    case_id: int,
+    body: CasePromoteIn,
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Promote a stub case into a real canonical case record.
+
+    - Clears ``is_stub = False``
+    - Preserves ``legacy_case_number`` (immutable after promotion)
+    - Recomputes ``case_fingerprint`` from real identifiers
+    - Logs a ``merge`` provenance event in ``change_log``
+    - Tracks caption change in ``case_caption_history``
+    """
+    _validate_provenance(body.citation_id, body.citation_justification)
+    case = await _get_case_or_404(session, case_id)
+
+    if not case.is_stub:
+        raise HTTPException(400, "Case is already a real (non-stub) record")
+
+    # Compute new fingerprint from best-known real identifiers
+    key_parts = "|".join([
+        (body.case_name or "").lower().strip(),
+        (body.court or "").lower().strip(),
+        str(body.filing_date) if body.filing_date else "",
+    ])
+    new_fingerprint = hashlib.sha256(key_parts.encode()).hexdigest()[:16]
+
+    # Record caption change
+    old_caption = case.case_name
+    session.add(CaseCaptionHistory(
+        case_id=case.id,
+        old_caption=old_caption,
+        new_caption=body.case_name,
+        changed_by=body.editor_id,
+        reason=body.reason,
+    ))
+
+    # Apply all submitted fields
+    updatable = [
+        "case_name", "court", "filing_date", "closing_date",
+        "case_status", "case_outcome", "case_type",
+        "plaintiff", "defendant", "judge", "summary",
+    ]
+    for field in updatable:
+        val = getattr(body, field, None)
+        if val is not None:
+            setattr(case, field, val)
+
+    case.is_stub = False
+    case.case_fingerprint = new_fingerprint
+    # legacy_case_number is intentionally preserved (locked)
+
+    await _log_change(
+        session, "cases", case.id, "is_stub",
+        old_value="true", new_value="false",
+        editor_id=body.editor_id,
+        reason=body.reason,
+        citation_id=body.citation_id,
+        citation_justification=body.citation_justification,
+        actor_type="human",
+        operation="merge",
+    )
+
+    await session.commit()
+    await session.refresh(case)
+    return case
 
 
 # ── POST /citations ──────────────────────────────────────────────────

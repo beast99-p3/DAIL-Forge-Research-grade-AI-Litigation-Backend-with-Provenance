@@ -9,10 +9,11 @@ Schema files → ``raw_schema_field``
 Data files   → the appropriate ``raw_*`` table via fuzzy column mapping.
 """
 
+import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Tuple, Type
 
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -216,3 +217,81 @@ def load_all_raw(session: Session, data_dir: Path = DATA_DIR) -> Dict[str, int]:
         results[fpath.name] = count
 
     return results
+
+
+# ── File-hash utilities ────────────────────────────────────────────────────
+
+def _sha256(path: Path) -> str:
+    """Return the SHA-256 hex digest of a file."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def compute_file_hashes(data_dir: Path = DATA_DIR) -> Dict[str, str]:
+    """
+    Compute SHA-256 hashes for every recognised Excel file in *data_dir*.
+
+    Returns ``{filename: sha256_hex}`` – stored in ``pipeline_runs.file_hashes``
+    for schema drift detection across runs.
+    """
+    hashes: Dict[str, str] = {}
+    all_globs = (
+        [cfg["glob"] for cfg in SCHEMA_FILE_CONFIG]
+        + [cfg["glob"] for cfg in DATA_FILE_CONFIG]
+    )
+    for glob in all_globs:
+        for fpath in sorted(data_dir.glob(glob)):
+            hashes[fpath.name] = _sha256(fpath)
+    return hashes
+
+
+def detect_schema_drift(
+    session: Session,
+    current_hashes: Dict[str, str],
+) -> List[str]:
+    """
+    Compare *current_hashes* against the most recent successful pipeline run.
+
+    Returns a list of human-readable drift messages (empty → no drift).
+    Logs a loud WARNING for every changed or new file detected.
+    """
+    from db.models import PipelineRun  # avoid circular at module level
+    from sqlalchemy import desc
+
+    last_run = (
+        session.query(PipelineRun)
+        .filter(PipelineRun.status == "success", PipelineRun.file_hashes.isnot(None))
+        .order_by(desc(PipelineRun.started_at))
+        .first()
+    )
+
+    if last_run is None:
+        logger.info("Schema drift detection: no previous successful run found – skipping.")
+        return []
+
+    prev: Dict[str, str] = last_run.file_hashes or {}
+    messages: List[str] = []
+
+    for fname, sha in current_hashes.items():
+        if fname not in prev:
+            msg = f"NEW file detected: {fname}"
+            messages.append(msg)
+            logger.warning("⚠️  SCHEMA DRIFT: %s", msg)
+        elif prev[fname] != sha:
+            msg = f"CHANGED file: {fname} (hash {prev[fname][:8]}… → {sha[:8]}…)"
+            messages.append(msg)
+            logger.warning("⚠️  SCHEMA DRIFT: %s – column order/set may have changed!", msg)
+
+    for fname in prev:
+        if fname not in current_hashes:
+            msg = f"MISSING file vs last run: {fname}"
+            messages.append(msg)
+            logger.warning("⚠️  SCHEMA DRIFT: %s", msg)
+
+    if not messages:
+        logger.info("Schema drift detection: no changes detected vs last successful run.")
+
+    return messages

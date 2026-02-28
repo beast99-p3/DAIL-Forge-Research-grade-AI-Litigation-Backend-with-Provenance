@@ -1,14 +1,23 @@
 """
 Post-load validation checks  (schema-aware v2).
 
-Returns a list of warnings / errors that a human should review.
+Severity rules
+--------------
+ERROR   – Integrity violations that indicate corrupt or unusable data.
+          These BLOCK startup unless DAIL_ALLOW_DIRTY_STARTUP=true.
+          Examples: orphan FK references, duplicate PKs
+
+WARNING – Data quality issues that are non-blocking but need curator review.
+          Examples: missing optional fields, stub-heavy dataset
+
+INFO    – Informational counters (always emitted).
 """
 
 import logging
 from dataclasses import dataclass
 from typing import List
 
-from sqlalchemy import func, text
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from db.models import (
@@ -29,7 +38,7 @@ class ValidationResult:
 def validate(session: Session) -> List[ValidationResult]:
     results: List[ValidationResult] = []
 
-    # 1. Duplicate case_id in curated cases
+    # 1. Duplicate case_id in curated cases  → ERROR (integrity violation)
     dupes = (
         session.query(Case.case_id, func.count(Case.id))
         .group_by(Case.case_id)
@@ -42,12 +51,12 @@ def validate(session: Session) -> List[ValidationResult]:
             f"case_id={case_id!r} appears {cnt} times in curated cases",
         ))
 
-    # 2. Stub vs real case summary
+    # 2. Stub vs real case summary  → INFO (never blocking)
     total_cases = session.query(Case).count()
     stub_cases = session.query(Case).filter(Case.is_stub.is_(True)).count()
     real_cases = total_cases - stub_cases
     results.append(ValidationResult(
-        "warning" if stub_cases > 0 else "info",
+        "info",
         "stub_case_summary",
         f"{total_cases} total cases: {real_cases} real, {stub_cases} stubs "
         f"(synthesised from FK references)",
@@ -63,7 +72,7 @@ def validate(session: Session) -> List[ValidationResult]:
             f"{missing_name} non-stub curated cases have no case_name",
         ))
 
-    # 4. Orphan raw documents (case_id not matched in curated cases)
+    # 4. Orphan raw documents → ERROR (every document must link to a case)
     orphan_docs = (
         session.query(RawDocument)
         .filter(~RawDocument.case_id.in_(session.query(Case.case_id)))
@@ -72,11 +81,12 @@ def validate(session: Session) -> List[ValidationResult]:
     )
     if orphan_docs:
         results.append(ValidationResult(
-            "warning", "orphan_raw_documents",
-            f"{orphan_docs} raw document rows reference a case_id not found in curated cases",
+            "error", "orphan_raw_documents",
+            f"{orphan_docs} raw document rows reference a case_id not found in curated cases "
+            "(FK integrity violated – these rows were dropped from documents table)",
         ))
 
-    # 5. Orphan raw secondary sources
+    # 5. Orphan raw secondary sources → ERROR
     orphan_ss = (
         session.query(RawSecondarySource)
         .filter(~RawSecondarySource.case_id.in_(session.query(Case.case_id)))
@@ -85,8 +95,9 @@ def validate(session: Session) -> List[ValidationResult]:
     )
     if orphan_ss:
         results.append(ValidationResult(
-            "warning", "orphan_raw_secondary_sources",
-            f"{orphan_ss} raw secondary-source rows reference a case_id not found in curated cases",
+            "error", "orphan_raw_secondary_sources",
+            f"{orphan_ss} raw secondary-source rows reference a case_id not found in curated cases "
+            "(FK integrity violated – these rows were dropped from secondary_sources table)",
         ))
 
     # 6. Schema-metadata coverage

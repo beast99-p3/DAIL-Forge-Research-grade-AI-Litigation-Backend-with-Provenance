@@ -24,6 +24,8 @@ services:
       DATABASE_URL: "postgresql+asyncpg://dail:dail_secret@db:5432/dail_forge"
       DATABASE_URL_SYNC: "postgresql+psycopg2://dail:dail_secret@db:5432/dail_forge"
       CURATION_API_KEY: "dail-forge-secret-key-change-me"
+      # Set to "true" in dev/demo to allow startup even when pipeline has integrity errors
+      DAIL_ALLOW_DIRTY_STARTUP: "false"
     volumes:
       - ./data:/mnt/data
     depends_on:

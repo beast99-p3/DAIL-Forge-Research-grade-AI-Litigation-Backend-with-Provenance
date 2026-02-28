@@ -14,6 +14,9 @@ class TagOut(BaseModel):
     id: int
     tag_type: str
     value: str
+    slug: Optional[str] = None
+    is_official: bool = True
+    source: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -28,6 +31,7 @@ class TagCreate(BaseModel):
 
 class CaseBase(BaseModel):
     case_id: str
+    legacy_case_number: Optional[str] = None
     case_name: Optional[str] = None
     court: Optional[str] = None
     filing_date: Optional[date] = None
@@ -40,6 +44,7 @@ class CaseBase(BaseModel):
     judge: Optional[str] = None
     summary: Optional[str] = None
     is_stub: bool = False
+    case_fingerprint: Optional[str] = None
 
 
 class CaseOut(CaseBase):
@@ -157,6 +162,9 @@ class ChangeLogOut(BaseModel):
     reason: str
     citation_id: Optional[int] = None
     citation_justification: Optional[str] = None
+    actor_type: str = "human"
+    operation: str = "update"
+    run_id: Optional[str] = None
     changed_at: Optional[datetime] = None
 
     class Config:
@@ -168,7 +176,35 @@ class ChangeLogOut(BaseModel):
 class CaseTagCreate(BaseModel):
     tag_type: str = Field(..., description="One of: issue, area, cause, algorithm, harm")
     value: str
+    is_official: bool = Field(True, description="False marks the tag for curator review")
     editor_id: str
     reason: str
+    citation_id: Optional[int] = None
+    citation_justification: Optional[str] = None
+
+
+# ── Case Promote (stub → canonical) ──────────────────────────────────
+
+class CasePromoteIn(BaseModel):
+    """Payload for POST /cases/{id}/promote.
+
+    Promotes a stub case into a real case record, locks the legacy number,
+    and records a merge/provenance event in change_log.
+    """
+    case_name: str = Field(..., description="Official case caption")
+    court: Optional[str] = None
+    filing_date: Optional[date] = None
+    closing_date: Optional[date] = None
+    case_status: Optional[str] = None
+    case_outcome: Optional[str] = None
+    case_type: Optional[str] = None
+    plaintiff: Optional[str] = None
+    defendant: Optional[str] = None
+    judge: Optional[str] = None
+    summary: Optional[str] = None
+
+    # Provenance (required)
+    editor_id: str = Field(..., description="Who is promoting this stub")
+    reason: str = Field(..., description="Why this stub is being promoted to a real case")
     citation_id: Optional[int] = None
     citation_justification: Optional[str] = None
