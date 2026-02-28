@@ -6,50 +6,79 @@ DAIL Forge migrates DAIL from low-code spreadsheet exports into a normalised, AP
 
 ---
 
+## Data Assessment
+
+> **Critical finding**: The four DAIL Excel exports are _not all data files_.
+
+| File | Rows | Type | How we handle it |
+|------|------|------|-----------------|
+| `Case_Table_*.xlsx` | ~36 | **Schema metadata** – each row defines a column (Name, DataType, Unique, Label) | Parsed into `raw_schema_field` |
+| `Docket_Table_*.xlsx` | ~5 | **Schema metadata** – same structure | Parsed into `raw_schema_field` |
+| `Document_Table_*.xlsx` | ~863 | **Actual data** – one row per document | Loaded into `raw_document` |
+| `Secondary_Source_Coverage_Table_*.xlsx` | ~389 | **Actual data** – one row per source | Loaded into `raw_secondary_source` |
+
+Both data files reference `Case_Number` (values 1–518, ~378 unique) as a foreign key, but **no case-data export exists**. The pipeline solves this by synthesising _stub case records_ from every unique Case_Number found in the data tables.
+
+---
+
 ## Architecture Overview
 
 ```
-┌──────────────┐      ┌──────────────────────────────────────────┐
-│  Excel Files │─────▶│           Pipeline (Python)              │
-│  (./data/)   │      │  load_all  →  transform  →  validate    │
-└──────────────┘      └──────────┬───────────────────────────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────┐
-                    │   PostgreSQL 15        │
-                    │                        │
-                    │  RAW layer             │
-                    │    raw_case            │
-                    │    raw_docket          │
-                    │    raw_document        │
-                    │    raw_secondary_source│
-                    │                        │
-                    │  CURATED layer         │
-                    │    cases ──┬── tags    │
-                    │    dockets │  case_tags│
-                    │    documents           │
-                    │    secondary_sources   │
-                    │    case_caption_history│
-                    │                        │
-                    │  PROVENANCE layer      │
-                    │    citations           │
-                    │    change_log          │
-                    └────────────┬───────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────┐
-                    │   FastAPI (port 8000)  │
-                    │                        │
-                    │  GET  /cases           │◀── Public
-                    │  GET  /cases/{id}      │    Research
-                    │  GET  /export/cases.csv│    API
-                    │                        │
-                    │  PATCH /cases/{id}     │◀── Restricted
-                    │  POST  /cases/{id}/tags│    Curation
-                    │  POST  /citations      │    API (API key)
-                    │                        │
-                    │  POST /pipeline/load   │◀── Pipeline trigger
-                    └────────────────────────┘
+┌───────────────────────────┐   ┌──────────────────────────────────────────────────┐
+│  Excel Files  (./data/)   │──▶│  Pipeline  v2  (schema-aware)                    │
+│                           │   │                                                  │
+│  Case_Table.xlsx ─────────│──▶│  1. Detect schema-metadata vs data               │
+│   (36 rows = col defs)    │   │     → Schema files → raw_schema_field            │
+│                           │   │     → Data files   → raw_document /              │
+│  Docket_Table.xlsx ───────│──▶│                      raw_secondary_source        │
+│   (5 rows = col defs)     │   │                                                  │
+│                           │   │  2. Synthesise stub cases from Case_Number FKs   │
+│  Document_Table.xlsx ─────│──▶│     (creates ~378 stub Case records)             │
+│   (863 data rows)         │   │                                                  │
+│                           │   │  3. Transform raw data → curated tables          │
+│  Secondary_Source*.xlsx ──│──▶│                                                  │
+│   (389 data rows)         │   │  4. Validate                                     │
+└───────────────────────────┘   └──────────┬───────────────────────────────────────┘
+                                           │
+                                           ▼
+                              ┌────────────────────────────┐
+                              │   PostgreSQL 15             │
+                              │                            │
+                              │  ┌─ RAW layer ──────────┐  │
+                              │  │  raw_schema_field     │  │
+                              │  │  raw_document         │  │
+                              │  │  raw_secondary_source │  │
+                              │  └───────────────────────┘  │
+                              │                            │
+                              │  ┌─ CURATED layer ──────┐  │
+                              │  │  cases (+ is_stub)    │  │
+                              │  │  tags    case_tags    │  │
+                              │  │  dockets              │  │
+                              │  │  documents            │  │
+                              │  │  secondary_sources    │  │
+                              │  │  case_caption_history │  │
+                              │  └───────────────────────┘  │
+                              │                            │
+                              │  ┌─ PROVENANCE layer ───┐  │
+                              │  │  citations            │  │
+                              │  │  change_log           │  │
+                              │  └───────────────────────┘  │
+                              └────────────┬───────────────┘
+                                           │
+                                           ▼
+                              ┌────────────────────────────┐
+                              │   FastAPI (port 8000)      │
+                              │                            │
+                              │  GET  /cases (?is_stub)    │◀── Public
+                              │  GET  /cases/{id}          │    Research
+                              │  GET  /export/cases.csv    │    API
+                              │                            │
+                              │  PATCH /cases/{id}         │◀── Restricted
+                              │  POST  /cases/{id}/tags    │    Curation
+                              │  POST  /citations          │    API (API key)
+                              │                            │
+                              │  POST /pipeline/load       │◀── Pipeline trigger
+                              └────────────────────────────┘
 ```
 
 ---
@@ -110,15 +139,16 @@ docker compose exec api python -m pipeline.load_all
 
 ## How to Load Data
 
-The pipeline runs in three steps:
+The pipeline runs in four steps:
 
-| Step | Action | Command |
-|------|--------|---------|
-| 1 | Excel → RAW tables | Loads every row verbatim. Unmapped columns go into `extra_fields` (JSON). |
-| 2 | RAW → CURATED | Parses dates, normalises multi-select fields into `tags` + `case_tags`. |
-| 3 | Validation | Checks for duplicates, missing required fields, orphan records. |
+| Step | Action | Detail |
+|------|--------|--------|
+| 1 | **Excel → RAW** | Schema-metadata files (Case_Table, Docket_Table) → `raw_schema_field`. Data files (Document_Table, Secondary_Source) → `raw_document` / `raw_secondary_source`. Unmapped columns go into `extra_fields` (JSON). |
+| 2 | **Stub synthesis** | Collects every unique `Case_Number` from data tables and creates stub `cases` records (`is_stub = true`) to satisfy FK constraints. |
+| 3 | **RAW → CURATED** | Parses dates, links documents and secondary sources to their stub (or real) cases. |
+| 4 | **Validation** | Checks for duplicates, orphan records, stub counts. |
 
-Multi-select columns (like `Issue_List`, `Area_List`) are split on `,;|\n` and linked via the normalised `tags` / `case_tags` tables.
+When a real case-data export becomes available, the pipeline can be extended to merge real records, clearing the `is_stub` flag.
 
 ---
 
@@ -149,7 +179,15 @@ curl "http://localhost:8000/cases?tag_type=issue&tag_value=privacy"
 curl "http://localhost:8000/cases?date_from=2023-01-01&date_to=2025-12-31"
 ```
 
-### 6. Get Single Case
+### 6. Filter Stub vs Real Cases
+```bash
+# Only stubs
+curl "http://localhost:8000/cases?is_stub=true"
+# Only real (non-stub) cases
+curl "http://localhost:8000/cases?is_stub=false"
+```
+
+### 7. Get Single Case
 ```bash
 curl http://localhost:8000/cases/1
 ```
@@ -159,7 +197,7 @@ curl http://localhost:8000/cases/1
 curl -o cases.csv "http://localhost:8000/export/cases.csv?court=federal"
 ```
 
-### 8. Create a Citation + Edit a Case (curation)
+### 9. Create a Citation + Edit a Case (curation)
 ```bash
 # Create citation
 curl -X POST http://localhost:8000/citations \
@@ -232,20 +270,19 @@ Tags are normalised into two tables:
 
 ## Entity-Relationship Diagram
 
-### RAW Layer (mirrors Excel 1:1)
+### RAW Layer
 
 | Table | Key Columns | Notes |
 |-------|------------|-------|
-| `raw_case` | id, row_number, case_id, case_name, court, filing_date, case_status, issue_list, area_list, cause_list, algorithm_list, harm_list, extra_fields | All text; extra_fields = JSON catch-all |
-| `raw_docket` | id, row_number, case_id, docket_number, entry_date, entry_text, filed_by, extra_fields | |
-| `raw_document` | id, row_number, case_id, document_title, document_type, document_date, url, extra_fields | |
-| `raw_secondary_source` | id, row_number, case_id, source_title, source_type, publication_date, author, url, extra_fields | |
+| `raw_schema_field` | id, source_file, row_number, field_name, data_type, is_unique, label, extra_fields | Parsed from Case_Table / Docket_Table schema-metadata files |
+| `raw_document` | id, row_number, case_id, document_title, document_type, document_date, url, extra_fields | 863 rows from Document_Table |
+| `raw_secondary_source` | id, row_number, case_id, source_title, source_type, publication_date, author, url, extra_fields | 389 rows from Secondary_Source_Coverage_Table |
 
 ### CURATED Layer
 
 | Table | Key Columns | Relationships |
 |-------|------------|---------------|
-| `cases` | id (PK), case_id (UNIQUE), case_name, court, filing_date, closing_date, case_status, case_outcome, case_type, plaintiff, defendant, judge, summary | → dockets, documents, secondary_sources, case_tags |
+| `cases` | id (PK), case_id (UNIQUE), case_name, court, filing_date, closing_date, case_status, case_outcome, case_type, plaintiff, defendant, judge, summary, **is_stub** | → dockets, documents, secondary_sources, case_tags. **Stubs** are synthesised from FK references |
 | `tags` | id (PK), tag_type, value | UNIQUE(tag_type, value) |
 | `case_tags` | id (PK), case_id (FK→cases), tag_id (FK→tags) | UNIQUE(case_id, tag_id) |
 | `dockets` | id (PK), case_id (FK→cases), docket_number, entry_date, entry_text, filed_by | |
@@ -294,7 +331,8 @@ Tags are normalised into two tables:
 │   ├── schemas.py              # Pydantic models
 │   ├── routes_research.py      # Public read endpoints
 │   ├── routes_curation.py      # Restricted write endpoints
-│   └── routes_pipeline.py      # Pipeline trigger endpoint
+│   ├── routes_pipeline.py      # Pipeline trigger endpoint
+│   └── routes_stats.py         # Dashboard stats endpoint
 ├── db/
 │   ├── models.py               # SQLAlchemy ORM models
 │   ├── session.py              # Engine and session factories
@@ -313,6 +351,8 @@ Tags are normalised into two tables:
 │   ├── demo_load.sh            # Load Excel data
 │   ├── demo_query.sh           # Example read queries
 │   └── demo_edit.sh            # Curation + provenance demo
+├── static/
+│   └── index.html              # Single-page frontend dashboard
 └── data/
     └── (place .xlsx files here)
 ```

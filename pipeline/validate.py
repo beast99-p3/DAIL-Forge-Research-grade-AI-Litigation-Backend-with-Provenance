@@ -1,5 +1,5 @@
 """
-Post-load validation checks.
+Post-load validation checks  (schema-aware v2).
 
 Returns a list of warnings / errors that a human should review.
 """
@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from db.models import (
     Case, Docket, Document, SecondarySource,
-    RawCase, RawDocket, RawDocument, RawSecondarySource,
+    RawDocument, RawSecondarySource, RawSchemaField,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,36 +42,28 @@ def validate(session: Session) -> List[ValidationResult]:
             f"case_id={case_id!r} appears {cnt} times in curated cases",
         ))
 
-    # 2. Cases without filing_date
-    missing_date = session.query(Case).filter(Case.filing_date.is_(None)).count()
-    if missing_date:
-        results.append(ValidationResult(
-            "warning", "missing_filing_date",
-            f"{missing_date} curated cases have no filing_date",
-        ))
+    # 2. Stub vs real case summary
+    total_cases = session.query(Case).count()
+    stub_cases = session.query(Case).filter(Case.is_stub.is_(True)).count()
+    real_cases = total_cases - stub_cases
+    results.append(ValidationResult(
+        "warning" if stub_cases > 0 else "info",
+        "stub_case_summary",
+        f"{total_cases} total cases: {real_cases} real, {stub_cases} stubs "
+        f"(synthesised from FK references)",
+    ))
 
-    # 3. Cases without case_name
-    missing_name = session.query(Case).filter(Case.case_name.is_(None)).count()
+    # 3. Cases without case_name (stubs are expected to have placeholder names)
+    missing_name = session.query(Case).filter(
+        Case.case_name.is_(None), Case.is_stub.is_(False)
+    ).count()
     if missing_name:
         results.append(ValidationResult(
             "warning", "missing_case_name",
-            f"{missing_name} curated cases have no case_name",
+            f"{missing_name} non-stub curated cases have no case_name",
         ))
 
-    # 4. Orphan raw dockets (case_id not in curated cases)
-    orphan_dockets = (
-        session.query(RawDocket)
-        .filter(~RawDocket.case_id.in_(session.query(Case.case_id)))
-        .filter(RawDocket.case_id.isnot(None))
-        .count()
-    )
-    if orphan_dockets:
-        results.append(ValidationResult(
-            "warning", "orphan_raw_dockets",
-            f"{orphan_dockets} raw docket rows reference a case_id not found in curated cases",
-        ))
-
-    # 5. Orphan raw documents
+    # 4. Orphan raw documents (case_id not matched in curated cases)
     orphan_docs = (
         session.query(RawDocument)
         .filter(~RawDocument.case_id.in_(session.query(Case.case_id)))
@@ -84,7 +76,7 @@ def validate(session: Session) -> List[ValidationResult]:
             f"{orphan_docs} raw document rows reference a case_id not found in curated cases",
         ))
 
-    # 6. Orphan raw secondary sources
+    # 5. Orphan raw secondary sources
     orphan_ss = (
         session.query(RawSecondarySource)
         .filter(~RawSecondarySource.case_id.in_(session.query(Case.case_id)))
@@ -97,10 +89,23 @@ def validate(session: Session) -> List[ValidationResult]:
             f"{orphan_ss} raw secondary-source rows reference a case_id not found in curated cases",
         ))
 
-    # 7. Row-count summary
+    # 6. Schema-metadata coverage
+    schema_count = session.query(RawSchemaField).count()
+    schema_files = (
+        session.query(RawSchemaField.source_file)
+        .distinct()
+        .all()
+    )
+    file_names = [r[0] for r in schema_files]
+    results.append(ValidationResult(
+        "info" if schema_count > 0 else "warning",
+        "schema_metadata",
+        f"{schema_count} schema-field definitions loaded from {len(file_names)} file(s): "
+        + ", ".join(file_names) if file_names else "No schema files loaded",
+    ))
+
+    # 7. Row-count summary for data tables
     for label, raw_model, curated_model in [
-        ("cases", RawCase, Case),
-        ("dockets", RawDocket, Docket),
         ("documents", RawDocument, Document),
         ("secondary_sources", RawSecondarySource, SecondarySource),
     ]:
@@ -115,10 +120,14 @@ def validate(session: Session) -> List[ValidationResult]:
 
     # Log results
     for r in results:
-        log_fn = logger.error if r.level == "error" else logger.warning
-        log_fn("[%s] %s: %s", r.level.upper(), r.check, r.message)
+        if r.level == "error":
+            logger.error("[%s] %s: %s", r.level.upper(), r.check, r.message)
+        elif r.level == "warning":
+            logger.warning("[%s] %s: %s", r.level.upper(), r.check, r.message)
+        else:
+            logger.info("[%s] %s: %s", r.level.upper(), r.check, r.message)
 
-    if not results:
+    if not any(r.level in ("error", "warning") for r in results):
         logger.info("All validation checks passed ✓")
 
     return results

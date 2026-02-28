@@ -16,41 +16,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ── RAW LAYER ────────────────────────────────────────────────────
+    # Schema-metadata table (rows from Case_Table / Docket_Table)
     op.create_table(
-        "raw_case",
+        "raw_schema_field",
         sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
+        sa.Column("source_file", sa.String(128), nullable=False, index=True),
         sa.Column("row_number", sa.Integer, nullable=False),
         sa.Column("loaded_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("case_id", sa.String(64), index=True),
-        sa.Column("case_name", sa.Text),
-        sa.Column("court", sa.Text),
-        sa.Column("filing_date", sa.Text),
-        sa.Column("closing_date", sa.Text),
-        sa.Column("case_status", sa.Text),
-        sa.Column("case_outcome", sa.Text),
-        sa.Column("case_type", sa.Text),
-        sa.Column("plaintiff", sa.Text),
-        sa.Column("defendant", sa.Text),
-        sa.Column("judge", sa.Text),
-        sa.Column("summary", sa.Text),
-        sa.Column("issue_list", sa.Text),
-        sa.Column("area_list", sa.Text),
-        sa.Column("cause_list", sa.Text),
-        sa.Column("algorithm_list", sa.Text),
-        sa.Column("harm_list", sa.Text),
-        sa.Column("extra_fields", sa.JSON),
-    )
-
-    op.create_table(
-        "raw_docket",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column("row_number", sa.Integer, nullable=False),
-        sa.Column("loaded_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("case_id", sa.String(64), index=True),
-        sa.Column("docket_number", sa.Text),
-        sa.Column("entry_date", sa.Text),
-        sa.Column("entry_text", sa.Text),
-        sa.Column("filed_by", sa.Text),
+        sa.Column("field_name", sa.Text),
+        sa.Column("data_type", sa.Text),
+        sa.Column("is_unique", sa.Text),
+        sa.Column("label", sa.Text),
         sa.Column("extra_fields", sa.JSON),
     )
 
@@ -97,6 +73,7 @@ def upgrade() -> None:
         sa.Column("defendant", sa.Text),
         sa.Column("judge", sa.Text),
         sa.Column("summary", sa.Text),
+        sa.Column("is_stub", sa.Boolean, nullable=False, server_default="false", index=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
@@ -200,5 +177,4 @@ def downgrade() -> None:
     op.drop_table("cases")
     op.drop_table("raw_secondary_source")
     op.drop_table("raw_document")
-    op.drop_table("raw_docket")
-    op.drop_table("raw_case")
+    op.drop_table("raw_schema_field")

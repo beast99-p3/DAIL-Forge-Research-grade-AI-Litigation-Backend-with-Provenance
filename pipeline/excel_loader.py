@@ -1,9 +1,12 @@
 """
-Excel → RAW table loader.
+Excel → RAW table loader  (schema-aware v2).
 
-Reads an Excel workbook, maps columns via fuzzy aliases, and bulk-inserts
-into the appropriate raw_* table.  Unmapped columns are stored in the
-JSON ``extra_fields`` column so no data is ever lost.
+Reads an Excel workbook, auto-detects whether it is a *schema metadata*
+file (column-definition rows like Case_Table / Docket_Table) or a *data*
+file (Document_Table / Secondary_Source_Coverage_Table).
+
+Schema files → ``raw_schema_field``
+Data files   → the appropriate ``raw_*`` table via fuzzy column mapping.
 """
 
 import json
@@ -14,10 +17,10 @@ from typing import Any, Dict, List, Type
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from db.models import RawCase, RawDocket, RawDocument, RawSecondarySource
+from db.models import RawDocument, RawSecondarySource, RawSchemaField
 from pipeline.column_map import (
-    CASE_ALIASES, DOCKET_ALIASES, DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES,
-    build_column_map,
+    DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES, SCHEMA_FIELD_ALIASES,
+    build_column_map, is_schema_metadata_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +33,68 @@ def _safe_str(val: Any) -> str | None:
     return str(val).strip() or None
 
 
+# ── Schema-metadata loader ───────────────────────────────────────────
+
+def load_schema_to_raw(
+    session: Session,
+    filepath: Path,
+) -> int:
+    """
+    Load a schema-metadata Excel file (e.g. Case_Table, Docket_Table)
+    into ``raw_schema_field``.  Each row becomes one record describing
+    a column in the original DAIL table.
+
+    Returns the number of rows inserted.
+    """
+    logger.info("Loading schema metadata: %s → raw_schema_field", filepath.name)
+
+    df = pd.read_excel(filepath, engine="openpyxl")
+    headers = list(df.columns)
+    col_map = build_column_map(headers, SCHEMA_FIELD_ALIASES)
+
+    mapped_cols = set(col_map.keys())
+    extra_cols = [h for h in headers if h not in mapped_cols]
+
+    logger.info("  Mapped columns : %s", {v: k for k, v in col_map.items()})
+
+    # Idempotency: skip if this file was already loaded
+    existing = (
+        session.query(RawSchemaField)
+        .filter(RawSchemaField.source_file == filepath.name)
+        .count()
+    )
+    if existing > 0:
+        logger.info("  Already loaded %d rows from %s – skipping", existing, filepath.name)
+        return existing
+
+    rows_inserted = 0
+    for idx, row in df.iterrows():
+        kwargs: Dict[str, Any] = {
+            "source_file": filepath.name,
+            "row_number": int(idx) + 1,
+        }
+
+        for excel_col, canonical in col_map.items():
+            kwargs[canonical] = _safe_str(row.get(excel_col))
+
+        if extra_cols:
+            extras = {}
+            for ec in extra_cols:
+                val = _safe_str(row.get(ec))
+                if val is not None:
+                    extras[ec] = val
+            kwargs["extra_fields"] = extras if extras else None
+
+        session.add(RawSchemaField(**kwargs))
+        rows_inserted += 1
+
+    session.commit()
+    logger.info("  Inserted %d schema-field rows from %s", rows_inserted, filepath.name)
+    return rows_inserted
+
+
+# ── Data loader ──────────────────────────────────────────────────────
+
 def load_excel_to_raw(
     session: Session,
     filepath: Path,
@@ -37,7 +102,7 @@ def load_excel_to_raw(
     aliases: Dict[str, list[str]],
 ) -> int:
     """
-    Load a single Excel file into a RAW table.
+    Load a single data Excel file into a RAW table.
 
     Returns the number of rows inserted.
     """
@@ -45,6 +110,14 @@ def load_excel_to_raw(
 
     df = pd.read_excel(filepath, engine="openpyxl")
     headers = list(df.columns)
+
+    # Safety check — if this looks like a schema file, warn but proceed
+    if is_schema_metadata_file(headers):
+        logger.warning(
+            "  ⚠ %s looks like a schema-metadata file, but it was "
+            "configured as data.  Loading anyway.", filepath.name
+        )
+
     col_map = build_column_map(headers, aliases)
 
     mapped_cols = set(col_map.keys())
@@ -53,6 +126,15 @@ def load_excel_to_raw(
     logger.info("  Mapped columns : %s", {v: k for k, v in col_map.items()})
     if extra_cols:
         logger.info("  Extra columns  : %s", extra_cols)
+
+    # Idempotency: skip if rows already exist for this model
+    existing = session.query(model_class).count()
+    if existing > 0:
+        logger.info(
+            "  Table %s already has %d rows – skipping %s",
+            model_class.__tablename__, existing, filepath.name,
+        )
+        return existing
 
     rows_inserted = 0
     for idx, row in df.iterrows():
@@ -79,21 +161,18 @@ def load_excel_to_raw(
     return rows_inserted
 
 
-# ── Convenience wrappers ─────────────────────────────────────────────
+# ── File configuration ───────────────────────────────────────────────
 
 DATA_DIR = Path("/mnt/data")
 
-FILE_CONFIG = [
-    {
-        "glob": "Case_Table*.xlsx",
-        "model": RawCase,
-        "aliases": CASE_ALIASES,
-    },
-    {
-        "glob": "Docket_Table*.xlsx",
-        "model": RawDocket,
-        "aliases": DOCKET_ALIASES,
-    },
+# Files whose rows are *schema metadata* (column definitions).
+SCHEMA_FILE_CONFIG = [
+    {"glob": "Case_Table*.xlsx",   "label": "case_schema"},
+    {"glob": "Docket_Table*.xlsx", "label": "docket_schema"},
+]
+
+# Files whose rows are *actual data*.
+DATA_FILE_CONFIG = [
     {
         "glob": "Document_Table*.xlsx",
         "model": RawDocument,
@@ -108,14 +187,32 @@ FILE_CONFIG = [
 
 
 def load_all_raw(session: Session, data_dir: Path = DATA_DIR) -> Dict[str, int]:
-    """Load every recognised Excel file from *data_dir* into RAW tables."""
+    """
+    Load every recognised Excel file from *data_dir*.
+
+    Schema-metadata files   → ``raw_schema_field``
+    Data files              → ``raw_document`` / ``raw_secondary_source``
+    """
     results: Dict[str, int] = {}
-    for cfg in FILE_CONFIG:
+
+    # ── Schema files ─────────────────────────────────────────────────
+    for cfg in SCHEMA_FILE_CONFIG:
         matches = sorted(data_dir.glob(cfg["glob"]))
         if not matches:
-            logger.warning("No file matching %s in %s", cfg["glob"], data_dir)
+            logger.warning("No schema file matching %s in %s", cfg["glob"], data_dir)
             continue
-        fpath = matches[-1]  # newest if multiple
+        fpath = matches[-1]
+        count = load_schema_to_raw(session, fpath)
+        results[f"{fpath.name} (schema)"] = count
+
+    # ── Data files ───────────────────────────────────────────────────
+    for cfg in DATA_FILE_CONFIG:
+        matches = sorted(data_dir.glob(cfg["glob"]))
+        if not matches:
+            logger.warning("No data file matching %s in %s", cfg["glob"], data_dir)
+            continue
+        fpath = matches[-1]
         count = load_excel_to_raw(session, fpath, cfg["model"], cfg["aliases"])
         results[fpath.name] = count
+
     return results

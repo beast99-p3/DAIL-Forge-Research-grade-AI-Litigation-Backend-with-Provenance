@@ -22,7 +22,7 @@ router = APIRouter(tags=["Pipeline"], dependencies=[Depends(require_api_key)])
 
 @router.post("/pipeline/load", status_code=200)
 async def trigger_pipeline():
-    """Run the full Excel → RAW → CURATED pipeline."""
+    """Run the full Excel → RAW → stub-synthesis → CURATED pipeline."""
     session = SyncSessionLocal()
     try:
         raw_counts = load_all_raw(session, DATA_DIR)

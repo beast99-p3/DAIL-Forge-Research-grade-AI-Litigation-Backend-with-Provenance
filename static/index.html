@@ -175,12 +175,21 @@ td.wrap{white-space:normal;max-width:300px}
 <div id="page-dashboard" class="page active">
   <h2 style="margin-bottom:1rem;color:#fff">Dashboard</h2>
   <div class="stats-row" id="stats-row">
-    <div class="stat-card cases"><div class="number" id="stat-cases">—</div><div class="label">Cases</div></div>
-    <div class="stat-card dockets"><div class="number" id="stat-dockets">—</div><div class="label">Dockets</div></div>
+    <div class="stat-card cases"><div class="number" id="stat-cases">—</div><div class="label">Total Cases</div><div style="font-size:.72rem;color:var(--text2);margin-top:.2rem" id="stat-cases-detail"></div></div>
     <div class="stat-card documents"><div class="number" id="stat-documents">—</div><div class="label">Documents</div></div>
     <div class="stat-card sources"><div class="number" id="stat-sources">—</div><div class="label">Secondary Sources</div></div>
+    <div class="stat-card dockets"><div class="number" id="stat-dockets">—</div><div class="label">Dockets</div></div>
     <div class="stat-card tags"><div class="number" id="stat-tags">—</div><div class="label">Tags</div></div>
     <div class="stat-card changes"><div class="number" id="stat-changes">—</div><div class="label">Change Log Entries</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:1rem;border-color:var(--orange)">
+    <h3 style="color:var(--orange)">⚠️ Schema-Aware Prototype</h3>
+    <p style="color:var(--text2);font-size:.85rem;margin-top:.4rem;line-height:1.7">
+      The DAIL export contains <strong style="color:var(--accent2)">Case_Table</strong> and <strong style="color:var(--accent2)">Docket_Table</strong> as <em>schema metadata</em> (column definitions), not case/docket records.
+      Only <strong style="color:var(--green)">Document_Table</strong> (863 rows) and <strong style="color:var(--green)">Secondary_Source_Coverage_Table</strong> (389 rows) contain actual data.
+      Cases shown below are <strong style="color:var(--orange)">stub records</strong> synthesised from Case_Number FK references — ready to be enriched when real case data becomes available.
+    </p>
   </div>
 
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
@@ -294,53 +303,64 @@ td.wrap{white-space:normal;max-width:300px}
   <h2 style="margin-bottom:1rem;color:#fff">🏗️ System Architecture</h2>
 
   <div class="arch-box">
-┌──────────────┐      ┌──────────────────────────────────────────────────┐
-│  Excel Files │─────▶│           Pipeline  (Python)                     │
-│  (./data/)   │      │  excel_loader  →  transform  →  validate        │
-└──────────────┘      └──────────┬───────────────────────────────────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────────┐
-                    │   PostgreSQL 15             │
-                    │                            │
-                    │  ┌─ RAW layer ──────────┐  │
-                    │  │  raw_case             │  │
-                    │  │  raw_docket           │  │
-                    │  │  raw_document         │  │
-                    │  │  raw_secondary_source │  │
-                    │  └───────────────────────┘  │
-                    │                            │
-                    │  ┌─ CURATED layer ──────┐  │
-                    │  │  cases ──── tags      │  │
-                    │  │  dockets   case_tags  │  │
-                    │  │  documents            │  │
-                    │  │  secondary_sources    │  │
-                    │  │  case_caption_history │  │
-                    │  └───────────────────────┘  │
-                    │                            │
-                    │  ┌─ PROVENANCE layer ───┐  │
-                    │  │  citations            │  │
-                    │  │  change_log           │  │
-                    │  └───────────────────────┘  │
-                    └────────────┬───────────────┘
-                                 │
-                                 ▼
-                    ┌────────────────────────────┐
-                    │   FastAPI  (port 8000)     │
-                    │                            │
-                    │  Research API  (public)    │
-                    │    GET  /cases             │
-                    │    GET  /cases/{id}        │
-                    │    GET  /export/cases.csv  │
-                    │                            │
-                    │  Curation API  (key auth)  │
-                    │    PATCH /cases/{id}       │
-                    │    POST  /cases/{id}/tags  │
-                    │    POST  /citations        │
-                    │                            │
-                    │  Pipeline API              │
-                    │    POST /pipeline/load     │
-                    └────────────────────────────┘
+┌───────────────────────────┐   ┌──────────────────────────────────────────────────┐
+│  Excel Files  (./data/)   │──▶│  Pipeline  v2  (schema-aware)                    │
+│                           │   │                                                  │
+│  Case_Table.xlsx ─────────│──▶│  1. Detect schema-metadata vs data               │
+│   (36 rows = col defs)    │   │     → Schema files → raw_schema_field            │
+│                           │   │     → Data files   → raw_document /              │
+│  Docket_Table.xlsx ───────│──▶│                      raw_secondary_source        │
+│   (5 rows = col defs)     │   │                                                  │
+│                           │   │  2. Synthesise stub cases from Case_Number FKs   │
+│  Document_Table.xlsx ─────│──▶│     (creates ~378 stub Case records)             │
+│   (863 data rows)         │   │                                                  │
+│                           │   │  3. Transform raw data → curated tables          │
+│  Secondary_Source*.xlsx ──│──▶│                                                  │
+│   (389 data rows)         │   │  4. Validate                                     │
+└───────────────────────────┘   └──────────┬───────────────────────────────────────┘
+                                           │
+                                           ▼
+                              ┌────────────────────────────┐
+                              │   PostgreSQL 15             │
+                              │                            │
+                              │  ┌─ RAW layer ──────────┐  │
+                              │  │  raw_schema_field     │  │
+                              │  │  raw_document         │  │
+                              │  │  raw_secondary_source │  │
+                              │  └───────────────────────┘  │
+                              │                            │
+                              │  ┌─ CURATED layer ──────┐  │
+                              │  │  cases (+ is_stub)    │  │
+                              │  │  tags    case_tags    │  │
+                              │  │  dockets              │  │
+                              │  │  documents            │  │
+                              │  │  secondary_sources    │  │
+                              │  │  case_caption_history │  │
+                              │  └───────────────────────┘  │
+                              │                            │
+                              │  ┌─ PROVENANCE layer ───┐  │
+                              │  │  citations            │  │
+                              │  │  change_log           │  │
+                              │  └───────────────────────┘  │
+                              └────────────┬───────────────┘
+                                           │
+                                           ▼
+                              ┌────────────────────────────┐
+                              │   FastAPI  (port 8000)     │
+                              │                            │
+                              │  Research API  (public)    │
+                              │    GET /cases  (?is_stub)  │
+                              │    GET /cases/{id}         │
+                              │    GET /export/cases.csv   │
+                              │                            │
+                              │  Curation API  (key auth)  │
+                              │    PATCH /cases/{id}       │
+                              │    POST  /cases/{id}/tags  │
+                              │    POST  /citations        │
+                              │                            │
+                              │  Pipeline API              │
+                              │    POST /pipeline/load     │
+                              └────────────────────────────┘
   </div>
 
   <div style="margin-top:1.5rem">
@@ -349,11 +369,10 @@ td.wrap{white-space:normal;max-width:300px}
       <table>
         <thead><tr><th>Layer</th><th>Table</th><th>Key Columns</th><th>Relationships</th></tr></thead>
         <tbody>
-          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_case</td><td>id, row_number, case_id, case_name, court, filing_date, issue_list, area_list, …, extra_fields (JSON)</td><td>—</td></tr>
-          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_docket</td><td>id, row_number, case_id, docket_number, entry_date, entry_text</td><td>—</td></tr>
+          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_schema_field</td><td>id, source_file, row_number, field_name, data_type, is_unique, label, extra_fields (JSON)</td><td>Parsed from Case_Table / Docket_Table schema-metadata files</td></tr>
           <tr><td><span class="tag tag-area">RAW</span></td><td>raw_document</td><td>id, row_number, case_id, document_title, document_type, url</td><td>—</td></tr>
           <tr><td><span class="tag tag-area">RAW</span></td><td>raw_secondary_source</td><td>id, row_number, case_id, source_title, source_type, url</td><td>—</td></tr>
-          <tr style="border-top:2px solid var(--accent)"><td><span class="tag tag-issue">CURATED</span></td><td>cases</td><td>id (PK), case_id (UNIQUE), case_name, court, filing_date, case_status, …</td><td>→ dockets, documents, secondary_sources, case_tags</td></tr>
+          <tr style="border-top:2px solid var(--accent)"><td><span class="tag tag-issue">CURATED</span></td><td>cases</td><td>id (PK), case_id (UNIQUE), case_name, court, filing_date, <strong>is_stub</strong>, …</td><td>→ dockets, documents, secondary_sources, case_tags — <em>stubs created from FK refs</em></td></tr>
           <tr><td><span class="tag tag-issue">CURATED</span></td><td>tags</td><td>id (PK), tag_type, value</td><td>UNIQUE(tag_type, value)</td></tr>
           <tr><td><span class="tag tag-issue">CURATED</span></td><td>case_tags</td><td>id, case_id (FK→cases), tag_id (FK→tags)</td><td>M:N join</td></tr>
           <tr><td><span class="tag tag-issue">CURATED</span></td><td>dockets</td><td>id, case_id (FK→cases), docket_number, entry_date</td><td>→ cases</td></tr>
@@ -448,6 +467,8 @@ async function loadDashboard() {
   try {
     const stats = await api('/stats');
     document.getElementById('stat-cases').textContent = stats.cases ?? 0;
+    const stubInfo = (stats.stub_cases > 0) ? `${stats.real_cases} real · ${stats.stub_cases} stubs` : '';
+    document.getElementById('stat-cases-detail').textContent = stubInfo;
     document.getElementById('stat-dockets').textContent = stats.dockets ?? 0;
     document.getElementById('stat-documents').textContent = stats.documents ?? 0;
     document.getElementById('stat-sources').textContent = stats.secondary_sources ?? 0;
@@ -474,7 +495,7 @@ async function loadDashboard() {
 
   // Recent cases
   try {
-    const data = await api('/cases?page=1&page_size=5&sort_by=filing_date&sort_dir=desc');
+    const data = await api('/cases?page=1&page_size=5&sort_by=id&sort_dir=desc');
     if (data.items.length) {
       let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Court</th><th>Filed</th><th>Status</th></tr></thead><tbody>';
       for (const c of data.items) {
@@ -537,7 +558,7 @@ async function searchCases(page = 1) {
     tag_value: document.getElementById('f-tag-value').value,
     date_from: document.getElementById('f-date-from').value,
     date_to: document.getElementById('f-date-to').value,
-    page, page_size: PAGE_SIZE, sort_by: 'filing_date', sort_dir: 'desc',
+    page, page_size: PAGE_SIZE, sort_by: 'id', sort_dir: 'asc',
   };
 
   document.getElementById('cases-table').innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Searching…</div>';
@@ -553,9 +574,10 @@ async function searchCases(page = 1) {
     let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Case ID</th><th>Name</th><th>Court</th><th>Filed</th><th>Status</th><th>Tags</th><th></th></tr></thead><tbody>';
     for (const c of data.items) {
       const tagsHtml = (c.tags || []).map(tagHtml).join(' ') || '—';
-      html += `<tr>
+      const stubBadge = c.is_stub ? '<span class="tag tag-default" style="font-size:.65rem">STUB</span> ' : '';
+      html += `<tr style="${c.is_stub ? 'opacity:.75' : ''}">
         <td>${c.id}</td><td>${escHtml(c.case_id)}</td>
-        <td class="wrap">${escHtml(c.case_name)}</td><td>${escHtml(c.court)}</td>
+        <td class="wrap">${stubBadge}${escHtml(c.case_name)}</td><td>${escHtml(c.court)}</td>
         <td>${c.filing_date||'—'}</td><td>${escHtml(c.case_status)}</td>
         <td class="wrap">${tagsHtml}</td>
         <td><button class="btn btn-sm btn-secondary" onclick="openCase(${c.id})">View</button></td>
@@ -617,14 +639,20 @@ async function openCase(id) {
       api(`/cases/${id}/change-log`).catch(() => []),
     ]);
 
+    const stubBanner = c.is_stub ? `<div class="card" style="margin-bottom:1rem;border-color:var(--orange);background:rgba(255,167,38,.06)">
+        <strong style="color:var(--orange)">⚠️ Stub Case</strong>
+        <span style="color:var(--text2);font-size:.85rem"> — This case record was synthesised from FK references in the data tables. No actual case data was available in the DAIL export. Use the Curate tab to enrich this record.</span>
+      </div>` : '';
+
     let html = `
       <div class="detail-header">
         <div>
-          <h2>${escHtml(c.case_name) || 'Unnamed Case'}</h2>
+          <h2>${c.is_stub ? '<span style="color:var(--orange)">[Stub]</span> ' : ''}${escHtml(c.case_name) || 'Unnamed Case'}</h2>
           <div style="color:var(--text2);font-size:.85rem;margin-top:.25rem">ID: ${c.id} · Case ID: ${escHtml(c.case_id)}</div>
         </div>
         <button class="btn btn-sm btn-secondary" onclick="document.getElementById('c-case-id').value=${c.id};showPage('curate');loadCaseForEdit()">✏️ Edit</button>
       </div>
+      ${stubBanner}
 
       <div class="detail-meta">
         <div class="meta-item"><div class="meta-label">Court</div><div class="meta-value">${escHtml(c.court)}</div></div>

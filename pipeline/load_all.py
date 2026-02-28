@@ -1,8 +1,15 @@
 """
-Master pipeline entry-point.
+Master pipeline entry-point  (schema-aware v2).
 
 Usage (inside container):
     python -m pipeline.load_all
+
+Pipeline stages
+---------------
+1. Load Excel → RAW  (schema metadata + data files)
+2. Synthesise stub cases from FK references
+3. Transform RAW data → CURATED
+4. Validate
 """
 
 import logging
@@ -25,14 +32,17 @@ logger = logging.getLogger("pipeline")
 
 def run(data_dir: Path = DATA_DIR) -> None:
     logger.info("=" * 60)
-    logger.info("DAIL Forge – Pipeline: load → transform → validate")
+    logger.info("DAIL Forge – Pipeline (schema-aware v2)")
+    logger.info("  load → stub-synthesis → transform → validate")
     logger.info("Data directory: %s", data_dir)
     logger.info("=" * 60)
 
     session: Session = SyncSessionLocal()
     try:
-        # Step 1 – Load Excel → RAW
+        # Step 1 – Load Excel → RAW tables
         logger.info("── Step 1: Excel → RAW tables ──")
+        logger.info("  Schema files → raw_schema_field")
+        logger.info("  Data files   → raw_document / raw_secondary_source")
         raw_counts = load_all_raw(session, data_dir)
         for fname, cnt in raw_counts.items():
             logger.info("  %s: %d rows", fname, cnt)
@@ -41,8 +51,8 @@ def run(data_dir: Path = DATA_DIR) -> None:
             logger.error("No Excel files found in %s – aborting.", data_dir)
             sys.exit(1)
 
-        # Step 2 – Transform RAW → CURATED
-        logger.info("── Step 2: RAW → CURATED ──")
+        # Step 2 – Stub synthesis + Transform RAW → CURATED
+        logger.info("── Step 2: Stub synthesis + RAW → CURATED ──")
         curated_counts = transform_all(session)
         for table, cnt in curated_counts.items():
             logger.info("  %s: %d rows", table, cnt)

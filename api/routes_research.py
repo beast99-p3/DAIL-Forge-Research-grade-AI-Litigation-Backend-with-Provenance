@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +27,14 @@ router = APIRouter(tags=["Research (public read)"])
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+# Columns that are safe to sort by
+_SORTABLE = {
+    "id", "case_id", "case_name", "court", "filing_date",
+    "closing_date", "case_status", "case_outcome", "is_stub",
+    "created_at", "updated_at",
+}
+
+
 def _case_query(
     tag_type: Optional[str] = None,
     tag_value: Optional[str] = None,
@@ -36,20 +44,29 @@ def _case_query(
     status: Optional[str] = None,
     outcome: Optional[str] = None,
     keyword: Optional[str] = None,
+    is_stub: Optional[bool] = None,
 ):
-    """Build a SELECT for cases with optional filters."""
-    stmt = select(Case).options(
-        selectinload(Case.tags).selectinload(CaseTag.tag)
+    """
+    Build a SELECT for cases with optional filters.
+
+    Tag filters use a JOIN which can produce duplicate rows – we guard
+    against that with a DISTINCT on ``cases.id`` so both COUNT and the
+    paginated fetch always return one row per case.
+    """
+    stmt = (
+        select(Case)
+        .options(selectinload(Case.tags).selectinload(CaseTag.tag))
+        .distinct()
     )
 
-    if tag_type and tag_value:
-        stmt = stmt.join(Case.tags).join(CaseTag.tag).filter(
-            Tag.tag_type == tag_type, Tag.value.ilike(f"%{tag_value}%")
-        )
-    elif tag_type:
-        stmt = stmt.join(Case.tags).join(CaseTag.tag).filter(Tag.tag_type == tag_type)
-    elif tag_value:
-        stmt = stmt.join(Case.tags).join(CaseTag.tag).filter(Tag.value.ilike(f"%{tag_value}%"))
+    if tag_type or tag_value:
+        stmt = stmt.join(Case.tags).join(CaseTag.tag)
+        if tag_type and tag_value:
+            stmt = stmt.filter(Tag.tag_type == tag_type, Tag.value.ilike(f"%{tag_value}%"))
+        elif tag_type:
+            stmt = stmt.filter(Tag.tag_type == tag_type)
+        else:
+            stmt = stmt.filter(Tag.value.ilike(f"%{tag_value}%"))
 
     if court:
         stmt = stmt.filter(Case.court.ilike(f"%{court}%"))
@@ -61,6 +78,8 @@ def _case_query(
         stmt = stmt.filter(Case.case_status.ilike(f"%{status}%"))
     if outcome:
         stmt = stmt.filter(Case.case_outcome.ilike(f"%{outcome}%"))
+    if is_stub is not None:
+        stmt = stmt.filter(Case.is_stub == is_stub)
     if keyword:
         pattern = f"%{keyword}%"
         stmt = stmt.filter(
@@ -75,6 +94,14 @@ def _case_query(
     return stmt
 
 
+def _count_query(base_stmt):
+    """
+    Return a COUNT statement from a base Case query.
+    Wraps in a subquery so DISTINCT and JOINs are handled correctly.
+    """
+    return select(func.count()).select_from(base_stmt.subquery())
+
+
 def _case_to_out(c: Case) -> CaseOut:
     tags = [TagOut(id=ct.tag.id, tag_type=ct.tag.tag_type, value=ct.tag.value) for ct in c.tags]
     return CaseOut(
@@ -82,7 +109,7 @@ def _case_to_out(c: Case) -> CaseOut:
         filing_date=c.filing_date, closing_date=c.closing_date,
         case_status=c.case_status, case_outcome=c.case_outcome,
         case_type=c.case_type, plaintiff=c.plaintiff, defendant=c.defendant,
-        judge=c.judge, summary=c.summary, tags=tags,
+        judge=c.judge, summary=c.summary, is_stub=c.is_stub, tags=tags,
         created_at=c.created_at, updated_at=c.updated_at,
     )
 
@@ -94,8 +121,8 @@ async def list_cases(
     session: AsyncSession = Depends(get_async_session),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=200),
-    sort_by: str = Query("filing_date", description="Sort field"),
-    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    sort_by: str = Query("id", description="Sort field"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
     tag_type: Optional[str] = None,
     tag_value: Optional[str] = None,
     court: Optional[str] = None,
@@ -104,17 +131,19 @@ async def list_cases(
     status: Optional[str] = None,
     outcome: Optional[str] = None,
     keyword: Optional[str] = None,
+    is_stub: Optional[bool] = Query(None, description="Filter by stub status"),
 ):
-    base = _case_query(tag_type, tag_value, court, date_from, date_to, status, outcome, keyword)
+    base = _case_query(tag_type, tag_value, court, date_from, date_to, status, outcome, keyword, is_stub)
 
-    # Total count
-    count_stmt = select(func.count()).select_from(base.subquery())
-    total = (await session.execute(count_stmt)).scalar_one()
+    # Total count – uses a clean subquery so JOINs don't inflate the count
+    total = (await session.execute(_count_query(base))).scalar_one()
 
-    # Sorting
-    sort_col = getattr(Case, sort_by, Case.filing_date)
+    # Validated sort column – fall back to id if unrecognised
+    sort_field = sort_by if sort_by in _SORTABLE else "id"
+    sort_col = getattr(Case, sort_field)
     order = sort_col.desc() if sort_dir == "desc" else sort_col.asc()
-    stmt = base.order_by(order).offset((page - 1) * page_size).limit(page_size)
+    # Always add a stable secondary sort so pagination is deterministic
+    stmt = base.order_by(order, Case.id.asc()).offset((page - 1) * page_size).limit(page_size)
 
     result = await session.execute(stmt)
     cases = result.unique().scalars().all()
@@ -193,7 +222,7 @@ async def export_cases_csv(
     header = [
         "id", "case_id", "case_name", "court", "filing_date", "closing_date",
         "case_status", "case_outcome", "case_type", "plaintiff", "defendant",
-        "judge", "summary", "tags",
+        "judge", "summary", "is_stub", "tags",
     ]
     writer.writerow(header)
 
@@ -202,7 +231,7 @@ async def export_cases_csv(
         writer.writerow([
             c.id, c.case_id, c.case_name, c.court, c.filing_date, c.closing_date,
             c.case_status, c.case_outcome, c.case_type, c.plaintiff, c.defendant,
-            c.judge, c.summary, tags_str,
+            c.judge, c.summary, c.is_stub, tags_str,
         ])
 
     buf.seek(0)

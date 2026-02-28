@@ -1,21 +1,33 @@
 """
-RAW → CURATED transform.
+RAW → CURATED transform  (schema-aware v2).
 
-Reads raw_* tables, parses dates, normalises tags, and populates
-the curated tables (cases, dockets, documents, secondary_sources, tags, case_tags).
+Key change from v1
+------------------
+Case_Table and Docket_Table are *schema metadata*, not data.  There are
+**no raw case rows** to transform.  Instead we:
+
+1. Collect every unique ``Case_Number`` referenced in ``raw_document``
+   and ``raw_secondary_source``.
+2. Synthesise one *stub* ``Case`` record per unique number
+   (``is_stub = True``).
+3. Transform documents and secondary sources as before, now with valid
+   FK targets.
+
+When a real case-data export becomes available the pipeline can be
+extended to merge real records in, clearing ``is_stub``.
 """
 
 import logging
 import re
 from datetime import date, datetime
-from typing import Optional
+from typing import Optional, Set
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from db.models import (
     Case, CaseTag, Docket, Document, SecondarySource, Tag,
-    RawCase, RawDocket, RawDocument, RawSecondarySource,
+    RawDocument, RawSecondarySource,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,7 +55,7 @@ def parse_date(val: Optional[str]) -> Optional[date]:
             return datetime.strptime(val, fmt).date()
         except ValueError:
             continue
-    # Try pandas-style
+    # Try dateutil fallback
     try:
         from dateutil.parser import parse as du_parse
         return du_parse(val).date()
@@ -52,13 +64,12 @@ def parse_date(val: Optional[str]) -> Optional[date]:
         return None
 
 
-# ── Tag parsing ──────────────────────────────────────────────────────
+# ── Tag helpers (retained for future use when real case data arrives) ─
 
 def split_multi_select(val: Optional[str]) -> list[str]:
     """Split a delimited multi-select field into individual tag values."""
     if not val:
         return []
-    # Common delimiters: comma, semicolon, pipe, newline
     parts = re.split(r"[;|,\n]+", val)
     return [p.strip() for p in parts if p.strip()]
 
@@ -73,8 +84,6 @@ def get_or_create_tag(session: Session, tag_type: str, value: str) -> Tag:
     return tag
 
 
-# ── Transform functions ──────────────────────────────────────────────
-
 TAG_FIELD_MAP = {
     "issue_list": "issue",
     "area_list": "area",
@@ -84,88 +93,84 @@ TAG_FIELD_MAP = {
 }
 
 
-def transform_cases(session: Session) -> int:
-    """Transform raw_case → cases + tags + case_tags."""
-    raws = session.query(RawCase).all()
-    count = 0
+# ── Stub case synthesis ──────────────────────────────────────────────
 
-    for raw in raws:
-        if not raw.case_id:
-            logger.warning("Skipping raw_case row %d: no case_id", raw.row_number)
-            continue
+def _collect_case_numbers(session: Session) -> Set[str]:
+    """
+    Gather every unique ``case_id`` value referenced in data raw tables.
+    These are the Case_Number values from Document_Table and
+    Secondary_Source_Coverage_Table.
+    """
+    ids: Set[str] = set()
 
-        # Upsert: skip if already exists
-        existing = session.query(Case).filter_by(case_id=raw.case_id).first()
-        if existing:
-            logger.debug("Case %s already exists, skipping", raw.case_id)
-            continue
-
-        case = Case(
-            case_id=raw.case_id,
-            case_name=raw.case_name,
-            court=raw.court,
-            filing_date=parse_date(raw.filing_date),
-            closing_date=parse_date(raw.closing_date),
-            case_status=raw.case_status,
-            case_outcome=raw.case_outcome,
-            case_type=raw.case_type,
-            plaintiff=raw.plaintiff,
-            defendant=raw.defendant,
-            judge=raw.judge,
-            summary=raw.summary,
+    for model in (RawDocument, RawSecondarySource):
+        rows = (
+            session.query(model.case_id)
+            .filter(model.case_id.isnot(None))
+            .distinct()
+            .all()
         )
-        session.add(case)
-        session.flush()  # need case.id
+        ids.update(r[0] for r in rows)
 
-        # Parse multi-select tag fields
-        for raw_field, tag_type in TAG_FIELD_MAP.items():
-            raw_value = getattr(raw, raw_field, None)
-            for tag_val in split_multi_select(raw_value):
-                tag = get_or_create_tag(session, tag_type, tag_val)
-                # Check for duplicate link
-                exists = session.query(CaseTag).filter_by(
-                    case_id=case.id, tag_id=tag.id
-                ).first()
-                if not exists:
-                    session.add(CaseTag(case_id=case.id, tag_id=tag.id))
+    return ids
 
+
+def synthesize_stub_cases(session: Session) -> int:
+    """
+    Create a stub ``Case`` for every Case_Number referenced in the data
+    tables that does not already exist in ``cases``.
+
+    Returns the number of stubs created.
+    """
+    needed = _collect_case_numbers(session)
+    if not needed:
+        logger.info("No case numbers found in data tables – nothing to synthesise")
+        return 0
+
+    existing = {
+        r[0]
+        for r in session.query(Case.case_id).filter(Case.case_id.in_(needed)).all()
+    }
+    to_create = needed - existing
+
+    logger.info(
+        "Stub synthesis: %d unique case numbers referenced, %d already exist, %d to create",
+        len(needed), len(existing), len(to_create),
+    )
+
+    count = 0
+    for case_num in sorted(to_create):
+        session.add(Case(
+            case_id=str(case_num),
+            case_name=f"[Stub] Case #{case_num}",
+            is_stub=True,
+        ))
         count += 1
 
     session.commit()
-    logger.info("Transformed %d cases", count)
+    logger.info("Synthesised %d stub case records", count)
     return count
 
 
+# ── FK resolver ──────────────────────────────────────────────────────
+
 def _resolve_case_pk(session: Session, raw_case_id: Optional[str]) -> Optional[int]:
-    """Look up curated cases.id from a raw case_id string."""
+    """Look up curated ``cases.id`` from a raw ``case_id`` string."""
     if not raw_case_id:
         return None
     case = session.query(Case).filter_by(case_id=raw_case_id).first()
     return case.id if case else None
 
 
-def transform_dockets(session: Session) -> int:
-    raws = session.query(RawDocket).all()
-    count = 0
-    for raw in raws:
-        case_pk = _resolve_case_pk(session, raw.case_id)
-        if not case_pk:
-            logger.warning("Orphan docket row %d: case_id=%s not found", raw.row_number, raw.case_id)
-            continue
-        session.add(Docket(
-            case_id=case_pk,
-            docket_number=raw.docket_number,
-            entry_date=parse_date(raw.entry_date),
-            entry_text=raw.entry_text,
-            filed_by=raw.filed_by,
-        ))
-        count += 1
-    session.commit()
-    logger.info("Transformed %d dockets", count)
-    return count
-
+# ── Transform functions ──────────────────────────────────────────────
 
 def transform_documents(session: Session) -> int:
+    # Idempotency: skip if curated documents already exist
+    if session.query(Document).count() > 0:
+        existing = session.query(Document).count()
+        logger.info("documents table already has %d rows – skipping transform", existing)
+        return existing
+
     raws = session.query(RawDocument).all()
     count = 0
     for raw in raws:
@@ -187,6 +192,12 @@ def transform_documents(session: Session) -> int:
 
 
 def transform_secondary_sources(session: Session) -> int:
+    # Idempotency: skip if curated sources already exist
+    if session.query(SecondarySource).count() > 0:
+        existing = session.query(SecondarySource).count()
+        logger.info("secondary_sources table already has %d rows – skipping transform", existing)
+        return existing
+
     raws = session.query(RawSecondarySource).all()
     count = 0
     for raw in raws:
@@ -209,10 +220,16 @@ def transform_secondary_sources(session: Session) -> int:
 
 
 def transform_all(session: Session) -> dict[str, int]:
-    """Run the full RAW → CURATED transform pipeline."""
+    """
+    Run the full RAW → CURATED transform pipeline.
+
+    Order:
+    1. Synthesise stub cases (so FK targets exist)
+    2. Transform documents
+    3. Transform secondary sources
+    """
     return {
-        "cases": transform_cases(session),
-        "dockets": transform_dockets(session),
+        "stub_cases": synthesize_stub_cases(session),
         "documents": transform_documents(session),
         "secondary_sources": transform_secondary_sources(session),
     }

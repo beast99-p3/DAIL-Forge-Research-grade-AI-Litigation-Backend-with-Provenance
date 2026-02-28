@@ -3,8 +3,11 @@ DAIL Forge – SQLAlchemy ORM models.
 
 Layout
 ------
-RAW layer   – mirrors Excel rows verbatim (raw_case, raw_docket, …)
-CURATED layer – normalised research-ready tables
+RAW layer   – mirrors Excel rows verbatim; schema-metadata files are stored
+              in ``raw_schema_field`` while actual data goes into raw_document
+              and raw_secondary_source.
+CURATED layer – normalised research-ready tables (cases may be *stubs*
+                synthesised from FK references when no case data was exported).
 PROVENANCE  – change_log + citations
 """
 
@@ -24,52 +27,33 @@ class Base(DeclarativeBase):
 
 
 # ====================================================================
-# RAW LAYER – one-to-one mirror of Excel exports
+# RAW LAYER
 # ====================================================================
 
-class RawCase(Base):
-    __tablename__ = "raw_case"
+# -- Schema-metadata rows (from Case_Table / Docket_Table) -----------
+
+class RawSchemaField(Base):
+    """
+    Stores column-definition rows from DAIL schema-metadata files.
+
+    Case_Table.xlsx and Docket_Table.xlsx contain ~36 / ~5 rows
+    respectively, each describing a column (Name, DataType, Unique, Label).
+    """
+    __tablename__ = "raw_schema_field"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_file: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    # --- columns discovered from the Case Excel ---
-    case_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
-    case_name: Mapped[Optional[str]] = mapped_column(Text)
-    court: Mapped[Optional[str]] = mapped_column(Text)
-    filing_date: Mapped[Optional[str]] = mapped_column(Text)
-    closing_date: Mapped[Optional[str]] = mapped_column(Text)
-    case_status: Mapped[Optional[str]] = mapped_column(Text)
-    case_outcome: Mapped[Optional[str]] = mapped_column(Text)
-    case_type: Mapped[Optional[str]] = mapped_column(Text)
-    plaintiff: Mapped[Optional[str]] = mapped_column(Text)
-    defendant: Mapped[Optional[str]] = mapped_column(Text)
-    judge: Mapped[Optional[str]] = mapped_column(Text)
-    summary: Mapped[Optional[str]] = mapped_column(Text)
-    issue_list: Mapped[Optional[str]] = mapped_column(Text)
-    area_list: Mapped[Optional[str]] = mapped_column(Text)
-    cause_list: Mapped[Optional[str]] = mapped_column(Text)
-    algorithm_list: Mapped[Optional[str]] = mapped_column(Text)
-    harm_list: Mapped[Optional[str]] = mapped_column(Text)
-    # Catch-all for any extra columns
+    field_name: Mapped[Optional[str]] = mapped_column(Text)
+    data_type: Mapped[Optional[str]] = mapped_column(Text)
+    is_unique: Mapped[Optional[str]] = mapped_column(Text)
+    label: Mapped[Optional[str]] = mapped_column(Text)
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
 
 
-class RawDocket(Base):
-    __tablename__ = "raw_docket"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
-    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    case_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
-    docket_number: Mapped[Optional[str]] = mapped_column(Text)
-    entry_date: Mapped[Optional[str]] = mapped_column(Text)
-    entry_text: Mapped[Optional[str]] = mapped_column(Text)
-    filed_by: Mapped[Optional[str]] = mapped_column(Text)
-    extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
-
+# -- Data rows (from Document_Table / Secondary_Source_Coverage_Table)
 
 class RawDocument(Base):
     __tablename__ = "raw_document"
@@ -122,6 +106,11 @@ class Case(Base):
     defendant: Mapped[Optional[str]] = mapped_column(Text)
     judge: Mapped[Optional[str]] = mapped_column(Text)
     summary: Mapped[Optional[str]] = mapped_column(Text)
+
+    # True when the case was synthesised from FK references rather than
+    # loaded from a real data file.  Curators should replace stubs with
+    # real data when the full Case export becomes available.
+    is_stub: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

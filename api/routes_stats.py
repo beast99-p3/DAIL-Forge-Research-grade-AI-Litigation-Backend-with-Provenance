@@ -18,6 +18,10 @@ router = APIRouter(tags=["Stats"])
 async def get_stats(session: AsyncSession = Depends(get_async_session)):
     """Return aggregate counts for the dashboard."""
     cases = (await session.execute(select(func.count(Case.id)))).scalar_one()
+    stub_cases = (await session.execute(
+        select(func.count(Case.id)).filter(Case.is_stub.is_(True))
+    )).scalar_one()
+    real_cases = cases - stub_cases
     dockets = (await session.execute(select(func.count(Docket.id)))).scalar_one()
     documents = (await session.execute(select(func.count(Document.id)))).scalar_one()
     sources = (await session.execute(select(func.count(SecondarySource.id)))).scalar_one()
@@ -36,6 +40,8 @@ async def get_stats(session: AsyncSession = Depends(get_async_session)):
 
     return {
         "cases": cases,
+        "stub_cases": stub_cases,
+        "real_cases": real_cases,
         "dockets": dockets,
         "documents": documents,
         "secondary_sources": sources,

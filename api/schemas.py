@@ -39,6 +39,7 @@ class CaseBase(BaseModel):
     defendant: Optional[str] = None
     judge: Optional[str] = None
     summary: Optional[str] = None
+    is_stub: bool = False
 
 
 class CaseOut(CaseBase):
