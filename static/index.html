@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DAIL Forge — Database of AI Litigation</title>
+<style>
+/* ── Reset & Variables ──────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--bg2:#161822;--bg3:#1e2030;--bg4:#272a3a;
+  --text:#c8cdd6;--text2:#8891a5;--accent:#6c8cff;--accent2:#4fc3f7;
+  --green:#66bb6a;--orange:#ffa726;--red:#ef5350;--purple:#ab47bc;
+  --border:#2a2e3e;--radius:10px;--shadow:0 2px 12px rgba(0,0,0,.3);
+  --font:'Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:'Cascadia Code','Fira Code','JetBrains Mono',monospace;
+}
+html{font-size:14px;scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.6;min-height:100vh}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+button{cursor:pointer;font-family:var(--font)}
+input,select,textarea{font-family:var(--font);font-size:.9rem}
+
+/* ── Layout ─────────────────────────────────────────────────────── */
+.app{display:flex;flex-direction:column;min-height:100vh}
+header{background:var(--bg2);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;gap:1rem;position:sticky;top:0;z-index:100}
+header .logo{font-size:1.3rem;font-weight:700;color:#fff;display:flex;align-items:center;gap:.5rem}
+header .logo span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header nav{display:flex;gap:.25rem;margin-left:auto}
+header nav button{background:none;border:1px solid transparent;color:var(--text2);padding:.4rem .9rem;border-radius:6px;font-size:.85rem;transition:all .15s}
+header nav button:hover{color:var(--text);background:var(--bg3)}
+header nav button.active{color:var(--accent);border-color:var(--accent);background:rgba(108,140,255,.08)}
+main{flex:1;padding:1.5rem;max-width:1400px;margin:0 auto;width:100%}
+.page{display:none}.page.active{display:block}
+footer{text-align:center;padding:1rem;color:var(--text2);font-size:.75rem;border-top:1px solid var(--border)}
+
+/* ── Cards ──────────────────────────────────────────────────────── */
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;transition:border-color .2s}
+.card:hover{border-color:var(--accent)}
+.card h3{margin-bottom:.5rem;color:#fff;font-size:1rem}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1rem;margin-top:1rem}
+
+/* ── Stats row ──────────────────────────────────────────────────── */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.75rem}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;text-align:center}
+.stat-card .number{font-size:2.2rem;font-weight:700;line-height:1}
+.stat-card .label{font-size:.8rem;color:var(--text2);margin-top:.3rem;text-transform:uppercase;letter-spacing:.5px}
+.stat-card.cases .number{color:var(--accent)}
+.stat-card.dockets .number{color:var(--accent2)}
+.stat-card.documents .number{color:var(--green)}
+.stat-card.sources .number{color:var(--orange)}
+.stat-card.tags .number{color:var(--purple)}
+.stat-card.changes .number{color:var(--red)}
+
+/* ── Filters ────────────────────────────────────────────────────── */
+.filters{display:flex;flex-wrap:wrap;gap:.6rem;margin-bottom:1.25rem;align-items:flex-end}
+.filter-group{display:flex;flex-direction:column;gap:.2rem}
+.filter-group label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.filter-group input,.filter-group select{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:.45rem .7rem;border-radius:6px;min-width:140px}
+.filter-group input:focus,.filter-group select:focus{outline:none;border-color:var(--accent)}
+.btn{padding:.5rem 1rem;border-radius:6px;border:none;font-size:.85rem;font-weight:500;transition:all .15s}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:#5a7ae6}
+.btn-secondary{background:var(--bg3);color:var(--text);border:1px solid var(--border)}.btn-secondary:hover{border-color:var(--accent)}
+.btn-sm{padding:.3rem .7rem;font-size:.78rem}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{opacity:.85}
+.btn-success{background:var(--green);color:#fff}.btn-success:hover{opacity:.85}
+
+/* ── Tables ─────────────────────────────────────────────────────── */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th,td{padding:.65rem .9rem;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+th{background:var(--bg3);color:var(--text2);font-weight:600;text-transform:uppercase;font-size:.72rem;letter-spacing:.5px;position:sticky;top:0}
+tr:hover td{background:rgba(108,140,255,.04)}
+td.wrap{white-space:normal;max-width:300px}
+
+/* ── Tags ───────────────────────────────────────────────────────── */
+.tag{display:inline-block;font-size:.72rem;padding:.15rem .5rem;border-radius:12px;margin:.1rem;font-weight:500}
+.tag-issue{background:rgba(108,140,255,.15);color:var(--accent)}
+.tag-area{background:rgba(79,195,247,.15);color:var(--accent2)}
+.tag-cause{background:rgba(102,187,106,.15);color:var(--green)}
+.tag-algorithm{background:rgba(171,71,188,.15);color:var(--purple)}
+.tag-harm{background:rgba(239,83,80,.15);color:var(--red)}
+.tag-default{background:rgba(255,167,38,.15);color:var(--orange)}
+
+/* ── Detail panel ───────────────────────────────────────────────── */
+.detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:1.5rem}
+.detail-header h2{font-size:1.3rem;color:#fff}
+.detail-meta{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1.5rem}
+.meta-item{background:var(--bg3);padding:.75rem;border-radius:8px}
+.meta-item .meta-label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.meta-item .meta-value{color:#fff;font-size:.9rem;margin-top:.15rem}
+.tabs{display:flex;gap:.25rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+.tab-btn{background:none;border:none;color:var(--text2);padding:.5rem 1rem;font-size:.85rem;border-bottom:2px solid transparent;transition:all .15s}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-panel{display:none}.tab-panel.active{display:block}
+
+/* ── Pagination ─────────────────────────────────────────────────── */
+.pagination{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-top:1rem}
+.pagination button{background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:.35rem .75rem;border-radius:6px;font-size:.8rem}
+.pagination button.active{border-color:var(--accent);color:var(--accent)}
+.pagination button:disabled{opacity:.3;cursor:not-allowed}
+.pagination .info{font-size:.8rem;color:var(--text2)}
+
+/* ── Modal ──────────────────────────────────────────────────────── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;width:90%;max-width:560px;max-height:85vh;overflow-y:auto}
+.modal h3{margin-bottom:1rem;color:#fff}
+.form-group{margin-bottom:.85rem}
+.form-group label{display:block;font-size:.75rem;color:var(--text2);margin-bottom:.25rem;text-transform:uppercase;letter-spacing:.3px}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:.5rem .7rem;border-radius:6px}
+.form-group textarea{min-height:60px;resize:vertical}
+.form-actions{display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem}
+
+/* ── Provenance timeline ────────────────────────────────────────── */
+.timeline{position:relative;padding-left:1.5rem;margin-top:.5rem}
+.timeline::before{content:'';position:absolute;left:.45rem;top:0;bottom:0;width:2px;background:var(--border)}
+.timeline-item{position:relative;padding-bottom:1.25rem}
+.timeline-item::before{content:'';position:absolute;left:-1.15rem;top:.35rem;width:10px;height:10px;border-radius:50%;background:var(--accent);border:2px solid var(--bg2)}
+.timeline-item .tl-time{font-size:.72rem;color:var(--text2)}
+.timeline-item .tl-body{background:var(--bg3);padding:.65rem .85rem;border-radius:8px;margin-top:.3rem;font-size:.83rem}
+.timeline-item .tl-field{color:var(--accent);font-weight:600}
+.timeline-item .tl-editor{color:var(--accent2)}
+.timeline-item .tl-values{display:flex;gap:.5rem;margin-top:.3rem;align-items:center}
+.tl-old{background:rgba(239,83,80,.1);color:var(--red);padding:.1rem .4rem;border-radius:4px;font-family:var(--mono);font-size:.78rem}
+.tl-arrow{color:var(--text2)}
+.tl-new{background:rgba(102,187,106,.1);color:var(--green);padding:.1rem .4rem;border-radius:4px;font-family:var(--mono);font-size:.78rem}
+
+/* ── Architecture diagram (text) ────────────────────────────────── */
+.arch-box{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem;font-family:var(--mono);font-size:.78rem;line-height:1.7;white-space:pre;overflow-x:auto;color:var(--text2)}
+
+/* ── Toast ──────────────────────────────────────────────────────── */
+.toast-container{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;display:flex;flex-direction:column;gap:.5rem}
+.toast{padding:.65rem 1rem;border-radius:8px;font-size:.83rem;color:#fff;animation:slideIn .3s ease}
+.toast-success{background:var(--green)}.toast-error{background:var(--red)}.toast-info{background:var(--accent)}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ── Loading ────────────────────────────────────────────────────── */
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-overlay{display:flex;align-items:center;justify-content:center;padding:3rem;color:var(--text2);gap:.5rem}
+.empty-state{text-align:center;padding:3rem;color:var(--text2)}
+.empty-state .icon{font-size:2.5rem;margin-bottom:.5rem}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media(max-width:768px){
+  .filters{flex-direction:column}
+  .stats-row{grid-template-columns:repeat(2,1fr)}
+  .detail-meta{grid-template-columns:1fr}
+  header nav button span.label{display:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ═══ HEADER ═══════════════════════════════════════════════════ -->
+<header>
+  <div class="logo">⚖️ <span>DAIL Forge</span></div>
+  <nav id="nav">
+    <button class="active" data-page="dashboard">📊 <span class="label">Dashboard</span></button>
+    <button data-page="cases">📁 <span class="label">Cases</span></button>
+    <button data-page="provenance">🔗 <span class="label">Provenance</span></button>
+    <button data-page="curate">✏️ <span class="label">Curate</span></button>
+    <button data-page="architecture">🏗️ <span class="label">Architecture</span></button>
+    <button onclick="window.open('/docs','_blank')">📄 <span class="label">API Docs</span></button>
+  </nav>
+</header>
+
+<!-- ═══ MAIN ════════════════════════════════════════════════════ -->
+<main>
+
+<!-- ─── Dashboard ────────────────────────────────────────────── -->
+<div id="page-dashboard" class="page active">
+  <h2 style="margin-bottom:1rem;color:#fff">Dashboard</h2>
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card cases"><div class="number" id="stat-cases">—</div><div class="label">Cases</div></div>
+    <div class="stat-card dockets"><div class="number" id="stat-dockets">—</div><div class="label">Dockets</div></div>
+    <div class="stat-card documents"><div class="number" id="stat-documents">—</div><div class="label">Documents</div></div>
+    <div class="stat-card sources"><div class="number" id="stat-sources">—</div><div class="label">Secondary Sources</div></div>
+    <div class="stat-card tags"><div class="number" id="stat-tags">—</div><div class="label">Tags</div></div>
+    <div class="stat-card changes"><div class="number" id="stat-changes">—</div><div class="label">Change Log Entries</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+    <div class="card">
+      <h3>🏛️ Recent Cases</h3>
+      <div id="recent-cases"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+    </div>
+    <div class="card">
+      <h3>📝 Recent Changes</h3>
+      <div id="recent-changes"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <h3>🏷️ Tag Distribution</h3>
+    <div id="tag-distribution" style="margin-top:.75rem"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+  </div>
+</div>
+
+<!-- ─── Cases Browser ────────────────────────────────────────── -->
+<div id="page-cases" class="page">
+  <h2 style="margin-bottom:1rem;color:#fff">Cases Browser</h2>
+  <div class="filters">
+    <div class="filter-group"><label>Keyword</label><input type="text" id="f-keyword" placeholder="Search name, parties…"></div>
+    <div class="filter-group"><label>Court</label><input type="text" id="f-court" placeholder="e.g. district"></div>
+    <div class="filter-group"><label>Status</label><input type="text" id="f-status" placeholder="e.g. open"></div>
+    <div class="filter-group"><label>Tag Type</label>
+      <select id="f-tag-type"><option value="">All</option><option>issue</option><option>area</option><option>cause</option><option>algorithm</option><option>harm</option></select>
+    </div>
+    <div class="filter-group"><label>Tag Value</label><input type="text" id="f-tag-value" placeholder="e.g. privacy"></div>
+    <div class="filter-group"><label>Date From</label><input type="date" id="f-date-from"></div>
+    <div class="filter-group"><label>Date To</label><input type="date" id="f-date-to"></div>
+    <button class="btn btn-primary" onclick="searchCases()">🔍 Search</button>
+    <button class="btn btn-secondary" onclick="resetFilters()">Clear</button>
+    <button class="btn btn-secondary" onclick="exportCSV()">⬇ CSV</button>
+  </div>
+  <div id="cases-table"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+  <div id="cases-pagination" class="pagination"></div>
+</div>
+
+<!-- ─── Case Detail (dynamically shown) ─────────────────────── -->
+<div id="page-case-detail" class="page">
+  <button class="btn btn-secondary btn-sm" onclick="showPage('cases')" style="margin-bottom:1rem">← Back to cases</button>
+  <div id="case-detail-content"></div>
+</div>
+
+<!-- ─── Provenance Ledger ────────────────────────────────────── -->
+<div id="page-provenance" class="page">
+  <h2 style="margin-bottom:1rem;color:#fff">🔗 Provenance Ledger</h2>
+  <p style="color:var(--text2);margin-bottom:1rem">Every curated edit is immutably recorded. Select a case to view its full audit trail.</p>
+  <div class="filters">
+    <div class="filter-group"><label>Case ID (numeric)</label><input type="number" id="prov-case-id" placeholder="e.g. 1" min="1"></div>
+    <button class="btn btn-primary" onclick="loadProvenance()">Load Change Log</button>
+  </div>
+  <div id="provenance-content"><div class="empty-state"><div class="icon">📋</div>Enter a case ID above to view its provenance timeline</div></div>
+</div>
+
+<!-- ─── Curate ───────────────────────────────────────────────── -->
+<div id="page-curate" class="page">
+  <h2 style="margin-bottom:.5rem;color:#fff">✏️ Curation Console</h2>
+  <p style="color:var(--text2);margin-bottom:1.25rem">All edits require an API key, editor ID, reason, and citation (or justification). Every change is logged to the provenance ledger.</p>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+    <!-- Edit Case -->
+    <div class="card">
+      <h3>Edit a Case</h3>
+      <div class="form-group"><label>API Key</label><input type="password" id="c-apikey" value="dail-forge-secret-key-change-me"></div>
+      <div class="form-group"><label>Case ID (numeric)</label><input type="number" id="c-case-id" placeholder="e.g. 1" min="1">
+        <button class="btn btn-sm btn-secondary" style="margin-top:.3rem" onclick="loadCaseForEdit()">Load case</button>
+      </div>
+      <div id="edit-form-fields" style="display:none">
+        <div class="form-group"><label>Case Name</label><input id="c-case-name"></div>
+        <div class="form-group"><label>Court</label><input id="c-court"></div>
+        <div class="form-group"><label>Status</label><input id="c-case-status"></div>
+        <div class="form-group"><label>Outcome</label><input id="c-case-outcome"></div>
+        <div class="form-group"><label>Editor ID</label><input id="c-editor" placeholder="your@email.edu"></div>
+        <div class="form-group"><label>Reason</label><textarea id="c-reason" placeholder="Why are you making this change?"></textarea></div>
+        <div class="form-group"><label>Citation ID (optional)</label><input type="number" id="c-citation-id"></div>
+        <div class="form-group"><label>Citation Justification (if no citation)</label><textarea id="c-citation-just" placeholder="Required when no citation ID"></textarea></div>
+        <button class="btn btn-primary" onclick="submitCaseEdit()">Save Changes</button>
+      </div>
+    </div>
+
+    <!-- Add Tag -->
+    <div class="card">
+      <h3>Add Tag to Case</h3>
+      <div class="form-group"><label>API Key</label><input type="password" id="t-apikey" value="dail-forge-secret-key-change-me"></div>
+      <div class="form-group"><label>Case ID</label><input type="number" id="t-case-id" placeholder="e.g. 1" min="1"></div>
+      <div class="form-group"><label>Tag Type</label>
+        <select id="t-tag-type"><option>issue</option><option>area</option><option>cause</option><option>algorithm</option><option>harm</option></select>
+      </div>
+      <div class="form-group"><label>Tag Value</label><input id="t-tag-value" placeholder="e.g. Facial Recognition"></div>
+      <div class="form-group"><label>Editor ID</label><input id="t-editor" placeholder="your@email.edu"></div>
+      <div class="form-group"><label>Reason</label><textarea id="t-reason" placeholder="Why?"></textarea></div>
+      <div class="form-group"><label>Citation ID (optional)</label><input type="number" id="t-citation-id"></div>
+      <div class="form-group"><label>Citation Justification</label><textarea id="t-citation-just" placeholder="If no citation ID"></textarea></div>
+      <button class="btn btn-primary" onclick="submitTagAdd()">Add Tag</button>
+
+      <hr style="border-color:var(--border);margin:1.25rem 0">
+      <h3>Create Citation</h3>
+      <div class="form-group"><label>Source Type</label><input id="ci-type" placeholder="court_filing, news, docket…"></div>
+      <div class="form-group"><label>Source Ref (URL)</label><input id="ci-ref" placeholder="https://…"></div>
+      <div class="form-group"><label>Description</label><input id="ci-desc" placeholder="Brief description"></div>
+      <button class="btn btn-success" onclick="submitCitation()">Create Citation</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Architecture ─────────────────────────────────────────── -->
+<div id="page-architecture" class="page">
+  <h2 style="margin-bottom:1rem;color:#fff">🏗️ System Architecture</h2>
+
+  <div class="arch-box">
+┌──────────────┐      ┌──────────────────────────────────────────────────┐
+│  Excel Files │─────▶│           Pipeline  (Python)                     │
+│  (./data/)   │      │  excel_loader  →  transform  →  validate        │
+└──────────────┘      └──────────┬───────────────────────────────────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────────┐
+                    │   PostgreSQL 15             │
+                    │                            │
+                    │  ┌─ RAW layer ──────────┐  │
+                    │  │  raw_case             │  │
+                    │  │  raw_docket           │  │
+                    │  │  raw_document         │  │
+                    │  │  raw_secondary_source │  │
+                    │  └───────────────────────┘  │
+                    │                            │
+                    │  ┌─ CURATED layer ──────┐  │
+                    │  │  cases ──── tags      │  │
+                    │  │  dockets   case_tags  │  │
+                    │  │  documents            │  │
+                    │  │  secondary_sources    │  │
+                    │  │  case_caption_history │  │
+                    │  └───────────────────────┘  │
+                    │                            │
+                    │  ┌─ PROVENANCE layer ───┐  │
+                    │  │  citations            │  │
+                    │  │  change_log           │  │
+                    │  └───────────────────────┘  │
+                    └────────────┬───────────────┘
+                                 │
+                                 ▼
+                    ┌────────────────────────────┐
+                    │   FastAPI  (port 8000)     │
+                    │                            │
+                    │  Research API  (public)    │
+                    │    GET  /cases             │
+                    │    GET  /cases/{id}        │
+                    │    GET  /export/cases.csv  │
+                    │                            │
+                    │  Curation API  (key auth)  │
+                    │    PATCH /cases/{id}       │
+                    │    POST  /cases/{id}/tags  │
+                    │    POST  /citations        │
+                    │                            │
+                    │  Pipeline API              │
+                    │    POST /pipeline/load     │
+                    └────────────────────────────┘
+  </div>
+
+  <div style="margin-top:1.5rem">
+    <h3 style="color:#fff;margin-bottom:.75rem">Entity-Relationship Diagram</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Layer</th><th>Table</th><th>Key Columns</th><th>Relationships</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_case</td><td>id, row_number, case_id, case_name, court, filing_date, issue_list, area_list, …, extra_fields (JSON)</td><td>—</td></tr>
+          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_docket</td><td>id, row_number, case_id, docket_number, entry_date, entry_text</td><td>—</td></tr>
+          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_document</td><td>id, row_number, case_id, document_title, document_type, url</td><td>—</td></tr>
+          <tr><td><span class="tag tag-area">RAW</span></td><td>raw_secondary_source</td><td>id, row_number, case_id, source_title, source_type, url</td><td>—</td></tr>
+          <tr style="border-top:2px solid var(--accent)"><td><span class="tag tag-issue">CURATED</span></td><td>cases</td><td>id (PK), case_id (UNIQUE), case_name, court, filing_date, case_status, …</td><td>→ dockets, documents, secondary_sources, case_tags</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>tags</td><td>id (PK), tag_type, value</td><td>UNIQUE(tag_type, value)</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>case_tags</td><td>id, case_id (FK→cases), tag_id (FK→tags)</td><td>M:N join</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>dockets</td><td>id, case_id (FK→cases), docket_number, entry_date</td><td>→ cases</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>documents</td><td>id, case_id (FK→cases), document_title, document_type, url</td><td>→ cases</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>secondary_sources</td><td>id, case_id (FK→cases), source_title, source_type, url</td><td>→ cases</td></tr>
+          <tr><td><span class="tag tag-issue">CURATED</span></td><td>case_caption_history</td><td>id, case_id (FK→cases), old_caption, new_caption, changed_at</td><td>→ cases</td></tr>
+          <tr style="border-top:2px solid var(--red)"><td><span class="tag tag-harm">PROVENANCE</span></td><td>citations</td><td>id (PK), source_type, source_ref, description</td><td>—</td></tr>
+          <tr><td><span class="tag tag-harm">PROVENANCE</span></td><td>change_log</td><td>id, table_name, record_id, field_name, old_value, new_value, editor_id, reason, citation_id (FK→citations)</td><td>→ citations</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:1.5rem">
+    <h3>Provenance Enforcement Rules</h3>
+    <ul style="margin-top:.5rem;padding-left:1.25rem;color:var(--text2);line-height:2">
+      <li>Every PATCH / POST to curation endpoints <strong style="color:var(--accent)">MUST</strong> include <code style="color:var(--accent2)">editor_id</code> + <code style="color:var(--accent2)">reason</code></li>
+      <li>At least one of <code style="color:var(--green)">citation_id</code> or <code style="color:var(--orange)">citation_justification</code> must be provided (422 otherwise)</li>
+      <li>Case-name changes are additionally tracked in <code style="color:var(--purple)">case_caption_history</code></li>
+      <li>The <code style="color:var(--red)">change_log</code> table is append-only — no deletes allowed</li>
+      <li>All write endpoints require <code style="color:var(--accent)">X-API-Key</code> header</li>
+    </ul>
+  </div>
+</div>
+
+</main>
+
+<footer>DAIL Forge v0.1.0 — Research-grade Database of AI Litigation Backend with Provenance</footer>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ═══ JAVASCRIPT ══════════════════════════════════════════════ -->
+<script>
+const API = '';  // same origin
+
+// ── Navigation ──────────────────────────────────────────────────
+document.querySelectorAll('#nav button[data-page]').forEach(btn => {
+  btn.addEventListener('click', () => showPage(btn.dataset.page));
+});
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#nav button').forEach(b => b.classList.remove('active'));
+  const page = document.getElementById('page-' + name);
+  if (page) page.classList.add('active');
+  const navBtn = document.querySelector(`#nav button[data-page="${name}"]`);
+  if (navBtn) navBtn.classList.add('active');
+}
+
+// ── Toast ────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ── API helpers ──────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+function qs(params) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== '' && v !== null && v !== undefined) p.append(k, v);
+  }
+  return p.toString() ? '?' + p.toString() : '';
+}
+
+function tagHtml(tag) {
+  const cls = ['issue','area','cause','algorithm','harm'].includes(tag.tag_type)
+    ? `tag-${tag.tag_type}` : 'tag-default';
+  return `<span class="tag ${cls}">${tag.tag_type}: ${tag.value}</span>`;
+}
+
+function escHtml(s) {
+  if (s == null) return '—';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Dashboard ────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const stats = await api('/stats');
+    document.getElementById('stat-cases').textContent = stats.cases ?? 0;
+    document.getElementById('stat-dockets').textContent = stats.dockets ?? 0;
+    document.getElementById('stat-documents').textContent = stats.documents ?? 0;
+    document.getElementById('stat-sources').textContent = stats.secondary_sources ?? 0;
+    document.getElementById('stat-tags').textContent = stats.tags ?? 0;
+    document.getElementById('stat-changes').textContent = stats.change_log_entries ?? 0;
+
+    // Tag distribution
+    if (stats.tag_distribution && stats.tag_distribution.length) {
+      let html = '<div style="display:flex;flex-wrap:wrap;gap:.5rem">';
+      for (const td of stats.tag_distribution) {
+        const cls = ['issue','area','cause','algorithm','harm'].includes(td.tag_type)
+          ? `tag-${td.tag_type}` : 'tag-default';
+        html += `<span class="tag ${cls}" style="font-size:.8rem;padding:.25rem .65rem">${td.tag_type}: ${td.value} (${td.count})</span>`;
+      }
+      html += '</div>';
+      document.getElementById('tag-distribution').innerHTML = html;
+    } else {
+      document.getElementById('tag-distribution').innerHTML = '<div class="empty-state">No tags yet. Load data first.</div>';
+    }
+  } catch (e) {
+    document.getElementById('stat-cases').textContent = '!';
+    toast('Error loading stats: ' + e.message, 'error');
+  }
+
+  // Recent cases
+  try {
+    const data = await api('/cases?page=1&page_size=5&sort_by=filing_date&sort_dir=desc');
+    if (data.items.length) {
+      let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Court</th><th>Filed</th><th>Status</th></tr></thead><tbody>';
+      for (const c of data.items) {
+        html += `<tr style="cursor:pointer" onclick="openCase(${c.id})">
+          <td>${c.id}</td><td class="wrap">${escHtml(c.case_name)}</td>
+          <td>${escHtml(c.court)}</td><td>${c.filing_date||'—'}</td>
+          <td>${escHtml(c.case_status)}</td></tr>`;
+      }
+      html += '</tbody></table>';
+      document.getElementById('recent-cases').innerHTML = html;
+    } else {
+      document.getElementById('recent-cases').innerHTML = '<div class="empty-state"><div class="icon">📁</div>No cases loaded yet</div>';
+    }
+  } catch (e) {
+    document.getElementById('recent-cases').innerHTML = '<div class="empty-state">Could not load cases</div>';
+  }
+
+  // Recent changes
+  try {
+    const changes = await api('/stats/recent-changes');
+    if (changes.length) {
+      let html = '<div class="timeline">';
+      for (const ch of changes) {
+        html += `<div class="timeline-item">
+          <div class="tl-time">${new Date(ch.changed_at).toLocaleString()}</div>
+          <div class="tl-body">
+            <span class="tl-editor">${escHtml(ch.editor_id)}</span> changed
+            <span class="tl-field">${ch.table_name}.${ch.field_name}</span>
+            on record #${ch.record_id}
+            <div class="tl-values">
+              <span class="tl-old">${escHtml(ch.old_value)}</span>
+              <span class="tl-arrow">→</span>
+              <span class="tl-new">${escHtml(ch.new_value)}</span>
+            </div>
+            <div style="font-size:.75rem;color:var(--text2);margin-top:.2rem">Reason: ${escHtml(ch.reason)}</div>
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+      document.getElementById('recent-changes').innerHTML = html;
+    } else {
+      document.getElementById('recent-changes').innerHTML = '<div class="empty-state"><div class="icon">📝</div>No changes recorded yet</div>';
+    }
+  } catch {
+    document.getElementById('recent-changes').innerHTML = '<div class="empty-state">No changes yet</div>';
+  }
+}
+
+// ── Cases Browser ────────────────────────────────────────────────
+let currentPage = 1;
+const PAGE_SIZE = 15;
+
+async function searchCases(page = 1) {
+  currentPage = page;
+  const params = {
+    keyword: document.getElementById('f-keyword').value,
+    court: document.getElementById('f-court').value,
+    status: document.getElementById('f-status').value,
+    tag_type: document.getElementById('f-tag-type').value,
+    tag_value: document.getElementById('f-tag-value').value,
+    date_from: document.getElementById('f-date-from').value,
+    date_to: document.getElementById('f-date-to').value,
+    page, page_size: PAGE_SIZE, sort_by: 'filing_date', sort_dir: 'desc',
+  };
+
+  document.getElementById('cases-table').innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Searching…</div>';
+
+  try {
+    const data = await api('/cases' + qs(params));
+    if (!data.items.length) {
+      document.getElementById('cases-table').innerHTML = '<div class="empty-state"><div class="icon">🔍</div>No cases match your filters</div>';
+      document.getElementById('cases-pagination').innerHTML = '';
+      return;
+    }
+
+    let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Case ID</th><th>Name</th><th>Court</th><th>Filed</th><th>Status</th><th>Tags</th><th></th></tr></thead><tbody>';
+    for (const c of data.items) {
+      const tagsHtml = (c.tags || []).map(tagHtml).join(' ') || '—';
+      html += `<tr>
+        <td>${c.id}</td><td>${escHtml(c.case_id)}</td>
+        <td class="wrap">${escHtml(c.case_name)}</td><td>${escHtml(c.court)}</td>
+        <td>${c.filing_date||'—'}</td><td>${escHtml(c.case_status)}</td>
+        <td class="wrap">${tagsHtml}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="openCase(${c.id})">View</button></td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    document.getElementById('cases-table').innerHTML = html;
+
+    // Pagination
+    const totalPages = Math.ceil(data.total / PAGE_SIZE);
+    let pag = `<span class="info">${data.total} cases | Page ${page}/${totalPages}</span>`;
+    pag += `<button ${page<=1?'disabled':''} onclick="searchCases(${page-1})">‹ Prev</button>`;
+    for (let i = Math.max(1,page-2); i <= Math.min(totalPages,page+2); i++) {
+      pag += `<button class="${i===page?'active':''}" onclick="searchCases(${i})">${i}</button>`;
+    }
+    pag += `<button ${page>=totalPages?'disabled':''} onclick="searchCases(${page+1})">Next ›</button>`;
+    document.getElementById('cases-pagination').innerHTML = pag;
+
+  } catch (e) {
+    document.getElementById('cases-table').innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+    toast(e.message, 'error');
+  }
+}
+
+function resetFilters() {
+  ['f-keyword','f-court','f-status','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
+  searchCases(1);
+}
+
+function exportCSV() {
+  const params = {
+    keyword: document.getElementById('f-keyword').value,
+    court: document.getElementById('f-court').value,
+    status: document.getElementById('f-status').value,
+    tag_type: document.getElementById('f-tag-type').value,
+    tag_value: document.getElementById('f-tag-value').value,
+    date_from: document.getElementById('f-date-from').value,
+    date_to: document.getElementById('f-date-to').value,
+  };
+  window.open(API + '/export/cases.csv' + qs(params), '_blank');
+}
+
+// ── Case Detail ──────────────────────────────────────────────────
+async function openCase(id) {
+  showPage('case-detail');
+  const container = document.getElementById('case-detail-content');
+  container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading case…</div>';
+
+  try {
+    const c = await api(`/cases/${id}`);
+    const [dockets, docs, sources, changes] = await Promise.all([
+      api(`/cases/${id}/dockets`),
+      api(`/cases/${id}/documents`),
+      api(`/cases/${id}/secondary-sources`),
+      api(`/cases/${id}/change-log`).catch(() => []),
+    ]);
+
+    let html = `
+      <div class="detail-header">
+        <div>
+          <h2>${escHtml(c.case_name) || 'Unnamed Case'}</h2>
+          <div style="color:var(--text2);font-size:.85rem;margin-top:.25rem">ID: ${c.id} · Case ID: ${escHtml(c.case_id)}</div>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="document.getElementById('c-case-id').value=${c.id};showPage('curate');loadCaseForEdit()">✏️ Edit</button>
+      </div>
+
+      <div class="detail-meta">
+        <div class="meta-item"><div class="meta-label">Court</div><div class="meta-value">${escHtml(c.court)}</div></div>
+        <div class="meta-item"><div class="meta-label">Filing Date</div><div class="meta-value">${c.filing_date||'—'}</div></div>
+        <div class="meta-item"><div class="meta-label">Closing Date</div><div class="meta-value">${c.closing_date||'—'}</div></div>
+        <div class="meta-item"><div class="meta-label">Status</div><div class="meta-value">${escHtml(c.case_status)}</div></div>
+        <div class="meta-item"><div class="meta-label">Outcome</div><div class="meta-value">${escHtml(c.case_outcome)}</div></div>
+        <div class="meta-item"><div class="meta-label">Type</div><div class="meta-value">${escHtml(c.case_type)}</div></div>
+        <div class="meta-item"><div class="meta-label">Plaintiff</div><div class="meta-value">${escHtml(c.plaintiff)}</div></div>
+        <div class="meta-item"><div class="meta-label">Defendant</div><div class="meta-value">${escHtml(c.defendant)}</div></div>
+        <div class="meta-item"><div class="meta-label">Judge</div><div class="meta-value">${escHtml(c.judge)}</div></div>
+      </div>`;
+
+    // Tags
+    if (c.tags && c.tags.length) {
+      html += '<div style="margin-bottom:1rem">' + c.tags.map(tagHtml).join(' ') + '</div>';
+    }
+
+    // Summary
+    if (c.summary) {
+      html += `<div class="card" style="margin-bottom:1rem"><h3>Summary</h3><p style="margin-top:.4rem;color:var(--text2);font-size:.88rem;line-height:1.7">${escHtml(c.summary)}</p></div>`;
+    }
+
+    // Tabs
+    html += `<div class="tabs">
+      <button class="tab-btn active" onclick="switchTab(this,'tab-dockets')">Dockets (${dockets.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-docs')">Documents (${docs.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-sources')">Sources (${sources.length})</button>
+      <button class="tab-btn" onclick="switchTab(this,'tab-changelog')">Change Log (${changes.length})</button>
+    </div>`;
+
+    // Dockets tab
+    html += '<div class="tab-panel active" id="tab-dockets">';
+    if (dockets.length) {
+      html += '<div class="table-wrap"><table><thead><tr><th>Docket #</th><th>Date</th><th>Filed By</th><th>Entry Text</th></tr></thead><tbody>';
+      for (const d of dockets) html += `<tr><td>${escHtml(d.docket_number)}</td><td>${d.entry_date||'—'}</td><td>${escHtml(d.filed_by)}</td><td class="wrap">${escHtml(d.entry_text)}</td></tr>`;
+      html += '</tbody></table></div>';
+    } else html += '<div class="empty-state">No docket entries</div>';
+    html += '</div>';
+
+    // Documents tab
+    html += '<div class="tab-panel" id="tab-docs">';
+    if (docs.length) {
+      html += '<div class="table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Date</th><th>URL</th></tr></thead><tbody>';
+      for (const d of docs) html += `<tr><td class="wrap">${escHtml(d.document_title)}</td><td>${escHtml(d.document_type)}</td><td>${d.document_date||'—'}</td><td>${d.url?`<a href="${d.url}" target="_blank">Link</a>`:'—'}</td></tr>`;
+      html += '</tbody></table></div>';
+    } else html += '<div class="empty-state">No documents</div>';
+    html += '</div>';
+
+    // Secondary sources tab
+    html += '<div class="tab-panel" id="tab-sources">';
+    if (sources.length) {
+      html += '<div class="table-wrap"><table><thead><tr><th>Title</th><th>Type</th><th>Author</th><th>Date</th><th>URL</th></tr></thead><tbody>';
+      for (const s of sources) html += `<tr><td class="wrap">${escHtml(s.source_title)}</td><td>${escHtml(s.source_type)}</td><td>${escHtml(s.author)}</td><td>${s.publication_date||'—'}</td><td>${s.url?`<a href="${s.url}" target="_blank">Link</a>`:'—'}</td></tr>`;
+      html += '</tbody></table></div>';
+    } else html += '<div class="empty-state">No secondary sources</div>';
+    html += '</div>';
+
+    // Change log tab
+    html += '<div class="tab-panel" id="tab-changelog">';
+    if (changes.length) {
+      html += '<div class="timeline">';
+      for (const ch of changes) {
+        html += `<div class="timeline-item">
+          <div class="tl-time">${new Date(ch.changed_at).toLocaleString()}</div>
+          <div class="tl-body">
+            <span class="tl-editor">${escHtml(ch.editor_id)}</span> changed
+            <span class="tl-field">${ch.field_name}</span>
+            <div class="tl-values">
+              <span class="tl-old">${escHtml(ch.old_value)}</span>
+              <span class="tl-arrow">→</span>
+              <span class="tl-new">${escHtml(ch.new_value)}</span>
+            </div>
+            <div style="font-size:.75rem;color:var(--text2);margin-top:.2rem">
+              Reason: ${escHtml(ch.reason)}
+              ${ch.citation_id ? ` · Citation #${ch.citation_id}` : ''}
+              ${ch.citation_justification ? ` · ${escHtml(ch.citation_justification)}` : ''}
+            </div>
+          </div>
+        </div>`;
+      }
+      html += '</div>';
+    } else html += '<div class="empty-state">No changes recorded for this case</div>';
+    html += '</div>';
+
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Error loading case: ${e.message}</div>`;
+    toast(e.message, 'error');
+  }
+}
+
+function switchTab(btn, panelId) {
+  btn.closest('.page').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  btn.closest('.page').querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(panelId).classList.add('active');
+}
+
+// ── Provenance ───────────────────────────────────────────────────
+async function loadProvenance() {
+  const caseId = document.getElementById('prov-case-id').value;
+  if (!caseId) { toast('Enter a case ID', 'error'); return; }
+  const container = document.getElementById('provenance-content');
+  container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading…</div>';
+
+  try {
+    const changes = await api(`/cases/${caseId}/change-log`);
+    if (!changes.length) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">✅</div>No changes recorded for this case</div>';
+      return;
+    }
+
+    let html = `<h3 style="color:#fff;margin-bottom:.75rem">Change Log for Case #${caseId} (${changes.length} entries)</h3>`;
+    html += '<div class="timeline">';
+    for (const ch of changes) {
+      html += `<div class="timeline-item">
+        <div class="tl-time">${new Date(ch.changed_at).toLocaleString()}</div>
+        <div class="tl-body">
+          <span class="tl-editor">${escHtml(ch.editor_id)}</span> changed
+          <span class="tl-field">${ch.table_name}.${ch.field_name}</span>
+          <div class="tl-values">
+            <span class="tl-old">${escHtml(ch.old_value)}</span>
+            <span class="tl-arrow">→</span>
+            <span class="tl-new">${escHtml(ch.new_value)}</span>
+          </div>
+          <div style="font-size:.75rem;color:var(--text2);margin-top:.2rem">
+            <strong>Reason:</strong> ${escHtml(ch.reason)}
+            ${ch.citation_id ? `<br><strong>Citation:</strong> #${ch.citation_id}` : ''}
+            ${ch.citation_justification ? `<br><strong>Justification:</strong> ${escHtml(ch.citation_justification)}` : ''}
+          </div>
+        </div>
+      </div>`;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Error: ${e.message}</div>`;
+    toast(e.message, 'error');
+  }
+}
+
+// ── Curation ─────────────────────────────────────────────────────
+async function loadCaseForEdit() {
+  const caseId = document.getElementById('c-case-id').value;
+  if (!caseId) { toast('Enter a case ID', 'error'); return; }
+  try {
+    const c = await api(`/cases/${caseId}`);
+    document.getElementById('c-case-name').value = c.case_name || '';
+    document.getElementById('c-court').value = c.court || '';
+    document.getElementById('c-case-status').value = c.case_status || '';
+    document.getElementById('c-case-outcome').value = c.case_outcome || '';
+    document.getElementById('edit-form-fields').style.display = 'block';
+    toast(`Loaded case #${caseId}: ${c.case_name||c.case_id}`, 'success');
+  } catch (e) {
+    toast('Could not load case: ' + e.message, 'error');
+  }
+}
+
+async function submitCaseEdit() {
+  const caseId = document.getElementById('c-case-id').value;
+  const apiKey = document.getElementById('c-apikey').value;
+  const body = {
+    editor_id: document.getElementById('c-editor').value,
+    reason: document.getElementById('c-reason').value,
+    case_name: document.getElementById('c-case-name').value || undefined,
+    court: document.getElementById('c-court').value || undefined,
+    case_status: document.getElementById('c-case-status').value || undefined,
+    case_outcome: document.getElementById('c-case-outcome').value || undefined,
+  };
+
+  const citId = document.getElementById('c-citation-id').value;
+  if (citId) body.citation_id = Number(citId);
+  const just = document.getElementById('c-citation-just').value;
+  if (just) body.citation_justification = just;
+
+  // Clean undefined
+  Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+
+  try {
+    await api(`/cases/${caseId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify(body),
+    });
+    toast('Case updated successfully! Change logged.', 'success');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function submitTagAdd() {
+  const apiKey = document.getElementById('t-apikey').value;
+  const body = {
+    tag_type: document.getElementById('t-tag-type').value,
+    value: document.getElementById('t-tag-value').value,
+    editor_id: document.getElementById('t-editor').value,
+    reason: document.getElementById('t-reason').value,
+  };
+  const citId = document.getElementById('t-citation-id').value;
+  if (citId) body.citation_id = Number(citId);
+  const just = document.getElementById('t-citation-just').value;
+  if (just) body.citation_justification = just;
+
+  const caseId = document.getElementById('t-case-id').value;
+  try {
+    await api(`/cases/${caseId}/tags`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify(body),
+    });
+    toast('Tag added successfully!', 'success');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function submitCitation() {
+  const apiKey = document.getElementById('t-apikey').value || document.getElementById('c-apikey').value;
+  const body = {
+    source_type: document.getElementById('ci-type').value,
+    source_ref: document.getElementById('ci-ref').value,
+    description: document.getElementById('ci-desc').value || undefined,
+  };
+  Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+
+  try {
+    const result = await api('/citations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+      body: JSON.stringify(body),
+    });
+    toast(`Citation created! ID: ${result.id}`, 'success');
+  } catch (e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>
