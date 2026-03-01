@@ -291,6 +291,9 @@ mark{background:rgba(255,167,38,.25);color:var(--orange);padding:0 .15rem;border
       <select id="f-tag-type"><option value="">All</option><option>issue</option><option>area</option><option>cause</option><option>algorithm</option><option>harm</option></select>
     </div>
     <div class="filter-group"><label>Tag Value</label><input type="text" id="f-tag-value" placeholder="e.g. privacy"></div>
+    <div class="filter-group"><label>Record Type</label>
+      <select id="f-stub"><option value="">All</option><option value="false">Real cases</option><option value="true">Stubs only</option></select>
+    </div>
     <div class="filter-group"><label>Date From</label><input type="date" id="f-date-from"></div>
     <div class="filter-group"><label>Date To</label><input type="date" id="f-date-to"></div>
     <button class="btn btn-primary" onclick="searchCases()">🔍 Search</button>
@@ -545,6 +548,7 @@ function showPage(name) {
   if (page) page.classList.add('active');
   const navBtn = document.querySelector(`#nav button[data-page="${name}"]`);
   if (navBtn) navBtn.classList.add('active');
+  if (name === 'dashboard') loadDashboard();
   if (name === 'snapshots') loadSnapshots();
   if (name === 'cases') searchCases(1);
 }
@@ -579,7 +583,9 @@ function qs(params) {
 function tagHtml(tag) {
   const cls = ['issue','area','cause','algorithm','harm'].includes(tag.tag_type)
     ? `tag-${tag.tag_type}` : 'tag-default';
-  return `<span class="tag ${cls}">${tag.tag_type}: ${tag.value}</span>`;
+  // Strip surrounding single quotes from tag values (data artifact)
+  const val = String(tag.value || '').replace(/^'+|'+$/g, '');
+  return `<span class="tag ${cls}">${escHtml(tag.tag_type)}: ${escHtml(val)}</span>`;
 }
 
 function escHtml(s) {
@@ -688,6 +694,7 @@ async function searchCases(page = 1) {
     cite:      document.getElementById('f-cite').value,
     tag_type:  document.getElementById('f-tag-type').value,
     tag_value: document.getElementById('f-tag-value').value,
+    is_stub:   document.getElementById('f-stub').value,
     date_from: document.getElementById('f-date-from').value,
     date_to:   document.getElementById('f-date-to').value,
     page, page_size: PAGE_SIZE,
@@ -739,7 +746,7 @@ async function searchCases(page = 1) {
 }
 
 function resetFilters() {
-  ['f-keyword','f-fts','f-court','f-status','f-outcome','f-state','f-circuit','f-cite','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
+  ['f-keyword','f-fts','f-court','f-status','f-outcome','f-state','f-circuit','f-cite','f-tag-type','f-tag-value','f-stub','f-date-from','f-date-to'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -760,6 +767,7 @@ function exportCSV() {
     cite:      document.getElementById('f-cite').value,
     tag_type:  document.getElementById('f-tag-type').value,
     tag_value: document.getElementById('f-tag-value').value,
+    is_stub:   document.getElementById('f-stub').value,
     date_from: document.getElementById('f-date-from').value,
     date_to:   document.getElementById('f-date-to').value,
   };
@@ -780,6 +788,7 @@ async function loadFacets() {
     cite:      document.getElementById('f-cite').value,
     tag_type:  document.getElementById('f-tag-type').value,
     tag_value: document.getElementById('f-tag-value').value,
+    is_stub:   document.getElementById('f-stub').value,
     date_from: document.getElementById('f-date-from').value,
     date_to:   document.getElementById('f-date-to').value,
   };
@@ -797,8 +806,6 @@ async function loadFacets() {
       ).join(' ');
       return `<div style="margin-bottom:.6rem"><strong style="color:var(--text2);font-size:.8rem;text-transform:uppercase">${label}</strong><br>${items}</div>`;
     };
-    const applyMap = { 'Court': 'f-court', 'Status': 'f-status', 'Outcome': 'f-outcome',
-                       'Year': 'f-date-from', 'Circuit': 'f-circuit', 'State': 'f-state', 'Tag Type': 'f-tag-type' };
     panel.innerHTML =
       renderSection('Court',   f.courts)   +
       renderSection('Status',  f.statuses) +

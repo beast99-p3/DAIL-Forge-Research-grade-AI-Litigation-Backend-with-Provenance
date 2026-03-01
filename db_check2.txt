@@ -1,11 +1,2 @@
-﻿ https://harvardlawreview.org/2017/03/state-v-loomis/
- https://www.equivant.com/wisconsin-vs-loomis-court-affirms-the-use-of-compas-in-sentencing/
- https://jolt.law.harvard.edu/digest/algorithmic-due-process-mistaken-accountability-and-attribution-in-state-v-loomis-1
- https://liuncoverednews.blogspot.com/2020/08/new-lawsuit-nassau-reassessment-phase.html?m=1
- https://theislandnow.com/news-98/nassau-homeowners-sue-county-over-reassessment/
- https://greatneckrecord.com/judge-rules-reassessment-lawsuit-can-move-forward-as-class-action/
- https://ainowinstitute.org/publication/litigating-algorithms-2019-u-s-report-2
- http://www.thecourt.ca/ewert-v-canada-improving-prison-processes-for-indigenous-peoples/
- https://www.zdnet.com/article/the-aclu-sues-the-doj-for-details-on-its-use-of-facial-recognition-technology/
- http://www.dentonsdata.com/use-of-ai-algorithm-triggers-lawsuit-and-countersuit/
+﻿   880 |            0 |            0 |          0
 

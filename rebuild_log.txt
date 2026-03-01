@@ -1,4 +1,4 @@
-﻿docker-compose : time="2026-02-28T21:17:24-05:00" level=warning msg="C:\\MS(USA)\\Hackathons\\TAI 
+﻿docker-compose : time="2026-02-28T21:33:57-05:00" level=warning msg="C:\\MS(USA)\\Hackathons\\TAI 
 2026\\docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential 
 confusion"
 At line:1 char:38
@@ -20,7 +20,7 @@ At line:1 char:38
 #3 DONE 0.0s
 
 #2 [api internal] load metadata for docker.io/library/python:3.11-slim
-#2 DONE 0.9s
+#2 DONE 1.2s
 
 #4 [api internal] load .dockerignore
 #4 transferring context: 2B done
@@ -34,8 +34,8 @@ At line:1 char:38
 #6 DONE 0.1s
 
 #5 [api internal] load build context
-#5 transferring context: 420.31kB 0.4s done
-#5 DONE 0.4s
+#5 transferring context: 243.54kB 1.0s done
+#5 DONE 1.0s
 
 #7 [api 2/6] WORKDIR /app
 #7 CACHED
@@ -50,24 +50,24 @@ At line:1 char:38
 #10 CACHED
 
 #11 [api 6/6] COPY . .
-#11 DONE 1.3s
+#11 DONE 1.7s
 
 #12 [api] exporting to image
 #12 exporting layers
 #12 exporting layers 0.5s done
-#12 exporting manifest sha256:b3d2d833641e7e0bf8d1f8157dc171afe8c358fad13182721075a6cf86a587b3 0.0s done
-#12 exporting config sha256:81203d520acd1569f5eace76fe1112ded6d109a6849fed5571535507d59d1343 0.0s done
-#12 exporting attestation manifest sha256:fb6c4c781438b587217e24c5598c363e98b6f6a8d81900ae691175886deef4d8 0.0s done
-#12 exporting manifest list sha256:2d6cd80548d9956ea651609823bb3329d2df8b937e4a068da89d30146045abe9
-#12 exporting manifest list sha256:2d6cd80548d9956ea651609823bb3329d2df8b937e4a068da89d30146045abe9 0.0s done
+#12 exporting manifest sha256:1a878e85dd07f9eb43dd1fefda23c5029fed2e756c1d16929bfe9017ca9ebe1e 0.0s done
+#12 exporting config sha256:e063d5b72808147bbc11ee595df27c451600744b2109260b92f7af5f5a9137f8 0.0s done
+#12 exporting attestation manifest sha256:884f97d74bda0b1d139e1c8cf203ef1d2379ed8fcb176120455ae217b2609660 0.0s done
+#12 exporting manifest list sha256:33e845f953345215044a1a0ccc3fdfd6447c1a25334fcb29581b405578cab388
+#12 exporting manifest list sha256:33e845f953345215044a1a0ccc3fdfd6447c1a25334fcb29581b405578cab388 0.0s done
 #12 naming to docker.io/library/tai2026-api:latest done
 #12 unpacking to docker.io/library/tai2026-api:latest
-#12 unpacking to docker.io/library/tai2026-api:latest 0.4s done
-#12 DONE 1.0s
+#12 unpacking to docker.io/library/tai2026-api:latest 0.6s done
+#12 DONE 1.3s
 
 #13 [api] resolving provenance for metadata file
 #13 DONE 0.0s
-time="2026-02-28T21:17:24-05:00" level=warning msg="current commit information was not captured by the build" 
+time="2026-02-28T21:33:59-05:00" level=warning msg="current commit information was not captured by the build" 
 error="git was not found in the system: exec: \"git.exe\": executable file not found in %PATH%"
  Container tai2026-db-1  Running
  Container tai2026-api-1  Recreate

@@ -159,7 +159,11 @@ async def serve_frontend():
     """Serve the single-page frontend."""
     index = STATIC_DIR / "index.html"
     if index.exists():
-        return FileResponse(str(index), media_type="text/html")
+        return FileResponse(
+            str(index),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {"service": "DAIL Forge", "version": "0.1.0", "ui": "Place static/index.html to enable"}
 
 
