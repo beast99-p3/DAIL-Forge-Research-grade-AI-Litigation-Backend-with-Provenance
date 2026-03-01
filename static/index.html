@@ -545,6 +545,7 @@ function showPage(name) {
   const navBtn = document.querySelector(`#nav button[data-page="${name}"]`);
   if (navBtn) navBtn.classList.add('active');
   if (name === 'snapshots') loadSnapshots();
+  if (name === 'cases') searchCases(1);
 }
 
 // ── Toast ────────────────────────────────────────────────────────
