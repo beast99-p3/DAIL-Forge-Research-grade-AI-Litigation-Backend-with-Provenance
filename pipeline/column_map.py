@@ -50,8 +50,9 @@ CASE_ALIASES: Dict[str, list[str]] = {
 }
 
 DOCKET_ALIASES: Dict[str, list[str]] = {
-    "case_id":       [r"case.?number", r"case.?id", r"^id$"],
+    "case_id":       [r"case.?number", r"case.?id"],
     "docket_number": [r"^number$", r"docket.?(number|no|num|#)", r"entry.?number"],
+    "court":         [r"^court$", r"jurisdiction"],
     "entry_date":    [r"date", r"entry.?date", r"filed.?date"],
     "entry_text":    [r"text", r"entry.?text", r"description", r"entry"],
     "filed_by":      [r"filed.?by", r"filer", r"party"],

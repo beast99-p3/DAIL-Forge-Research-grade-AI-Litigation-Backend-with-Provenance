@@ -125,6 +125,29 @@ class RawSecondarySource(Base):
     row_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
+class RawDocket(Base):
+    """
+    Stores raw docket rows from Docket_Table.xlsx verbatim (sheet 0).
+    The second sheet ("Field Names, Types") is loaded into raw_schema_field.
+    """
+    __tablename__ = "raw_docket"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_file: Mapped[Optional[str]] = mapped_column(String(128), index=True)
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    case_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    court: Mapped[Optional[str]] = mapped_column(Text)
+    docket_number: Mapped[Optional[str]] = mapped_column(Text)
+    entry_date: Mapped[Optional[str]] = mapped_column(Text)
+    entry_text: Mapped[Optional[str]] = mapped_column(Text)
+    filed_by: Mapped[Optional[str]] = mapped_column(Text)
+    url: Mapped[Optional[str]] = mapped_column(Text)
+    extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    row_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+
+
 # ====================================================================
 # CURATED LAYER
 # ====================================================================

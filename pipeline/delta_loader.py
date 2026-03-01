@@ -30,12 +30,12 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from db.models import (
-    RawCase, RawDocument, RawSecondarySource, RawSchemaField,
+    RawCase, RawDocument, RawSecondarySource, RawSchemaField, RawDocket,
     RawDeltaLog,
 )
 from pipeline.column_map import (
     DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES,
-    SCHEMA_FIELD_ALIASES, CASE_ALIASES,
+    SCHEMA_FIELD_ALIASES, CASE_ALIASES, DOCKET_ALIASES,
     build_column_map, is_schema_metadata_file,
 )
 
@@ -90,11 +90,16 @@ def load_schema_to_raw_delta(
     session: Session,
     filepath: Path,
     run_id: str,
+    sheet_name: str | int = 1,
 ) -> dict:
-    """Delta-load a schema metadata file into ``raw_schema_field``."""
-    logger.info("[delta] %s → raw_schema_field", filepath.name)
+    """Delta-load the schema-metadata sheet of an Excel file into ``raw_schema_field``."""
+    logger.info("[delta] %s (sheet=%r) → raw_schema_field", filepath.name, sheet_name)
 
-    df = pd.read_excel(filepath, engine="openpyxl")
+    try:
+        df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
+    except Exception as exc:
+        logger.warning("  Could not read sheet %r from %s: %s", sheet_name, filepath.name, exc)
+        return {"insert": 0, "update": 0, "skip": 0}
     headers = list(df.columns)
     from pipeline.column_map import build_column_map
     col_map = build_column_map(headers, SCHEMA_FIELD_ALIASES)
@@ -161,15 +166,16 @@ def load_excel_to_raw_delta(
     model_class: Type,
     aliases: Dict[str, list],
     run_id: str,
+    sheet_name: str | int = 0,
 ) -> dict:
     """
-    Delta-load a single data Excel file into a RAW table.
+    Delta-load a single data Excel file (sheet 0 by default) into a RAW table.
 
     Returns ``{"insert": n, "update": n, "skip": n}``.
     """
-    logger.info("[delta] %s → %s", filepath.name, model_class.__tablename__)
+    logger.info("[delta] %s (sheet=%r) → %s", filepath.name, sheet_name, model_class.__tablename__)
 
-    df = pd.read_excel(filepath, engine="openpyxl")
+    df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
     headers = list(df.columns)
 
     if is_schema_metadata_file(headers):
@@ -204,6 +210,9 @@ def load_excel_to_raw_delta(
     for idx, row in df.iterrows():
         row_num = int(idx) + 1
         kwargs: Dict[str, Any] = {"row_number": row_num}
+        # source_file column (present on RawDocket; absent on other RAW models)
+        if hasattr(model_class, "source_file"):
+            kwargs["source_file"] = filepath.name
         for excel_col, canonical in col_map.items():
             kwargs[canonical] = _safe_str(row.get(excel_col))
         if extra_cols:
@@ -273,7 +282,9 @@ def load_all_raw_delta(
             logger.warning("No schema file matching %s in %s", cfg["glob"], data_dir)
             continue
         fpath = matches[-1]
-        results[f"{fpath.name} (schema)"] = load_schema_to_raw_delta(session, fpath, run_id)
+        results[f"{fpath.name} (schema)"] = load_schema_to_raw_delta(
+            session, fpath, run_id, sheet_name=cfg["sheet"]
+        )
 
     # Data files
     for cfg in DATA_FILE_CONFIG:
@@ -283,7 +294,8 @@ def load_all_raw_delta(
             continue
         fpath = matches[-1]
         results[fpath.name] = load_excel_to_raw_delta(
-            session, fpath, cfg["model"], cfg["aliases"], run_id
+            session, fpath, cfg["model"], cfg["aliases"], run_id,
+            sheet_name=cfg["sheet"]
         )
 
     return results

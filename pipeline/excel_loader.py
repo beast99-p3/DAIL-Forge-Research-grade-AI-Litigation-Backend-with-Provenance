@@ -18,9 +18,10 @@ from typing import Any, Dict, List, Tuple, Type
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from db.models import RawDocument, RawSecondarySource, RawSchemaField, RawCase
+from db.models import RawDocument, RawSecondarySource, RawSchemaField, RawCase, RawDocket
 from pipeline.column_map import (
-    DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES, SCHEMA_FIELD_ALIASES, CASE_ALIASES,
+    DOCUMENT_ALIASES, SECONDARY_SOURCE_ALIASES, SCHEMA_FIELD_ALIASES,
+    CASE_ALIASES, DOCKET_ALIASES,
     build_column_map, is_schema_metadata_file,
 )
 
@@ -39,17 +40,28 @@ def _safe_str(val: Any) -> str | None:
 def load_schema_to_raw(
     session: Session,
     filepath: Path,
+    sheet_name: str | int = 1,
 ) -> int:
     """
-    Load a schema-metadata Excel file (e.g. Case_Table, Docket_Table)
-    into ``raw_schema_field``.  Each row becomes one record describing
-    a column in the original DAIL table.
+    Load the schema-metadata sheet of an Excel file into ``raw_schema_field``.
+
+    Each file has TWO sheets:
+      - Sheet 0: actual data   (loaded by load_excel_to_raw)
+      - Sheet 1: column definitions (Name, DataType, Unique, Label) → this function
+
+    Existing rows for this source_file are deleted and reloaded on every
+    run so schema changes are always picked up.
 
     Returns the number of rows inserted.
     """
-    logger.info("Loading schema metadata: %s → raw_schema_field", filepath.name)
+    logger.info("Loading schema metadata: %s (sheet=%r) → raw_schema_field", filepath.name, sheet_name)
 
-    df = pd.read_excel(filepath, engine="openpyxl")
+    try:
+        df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
+    except Exception as exc:
+        logger.warning("  Could not read sheet %r from %s: %s", sheet_name, filepath.name, exc)
+        return 0
+
     headers = list(df.columns)
     col_map = build_column_map(headers, SCHEMA_FIELD_ALIASES)
 
@@ -58,15 +70,15 @@ def load_schema_to_raw(
 
     logger.info("  Mapped columns : %s", {v: k for k, v in col_map.items()})
 
-    # Idempotency: skip if this file was already loaded
-    existing = (
+    # Always delete + reload so stale/incorrect rows are corrected
+    deleted = (
         session.query(RawSchemaField)
         .filter(RawSchemaField.source_file == filepath.name)
-        .count()
+        .delete()
     )
-    if existing > 0:
-        logger.info("  Already loaded %d rows from %s – skipping", existing, filepath.name)
-        return existing
+    if deleted:
+        logger.info("  Cleared %d existing rows for %s", deleted, filepath.name)
+    session.flush()
 
     rows_inserted = 0
     for idx, row in df.iterrows():
@@ -101,15 +113,16 @@ def load_excel_to_raw(
     filepath: Path,
     model_class: Type,
     aliases: Dict[str, list[str]],
+    sheet_name: str | int = 0,
 ) -> int:
     """
-    Load a single data Excel file into a RAW table.
+    Load a single data Excel file (sheet 0 by default) into a RAW table.
 
     Returns the number of rows inserted.
     """
-    logger.info("Loading %s → %s", filepath.name, model_class.__tablename__)
+    logger.info("Loading %s (sheet=%r) → %s", filepath.name, sheet_name, model_class.__tablename__)
 
-    df = pd.read_excel(filepath, engine="openpyxl")
+    df = pd.read_excel(filepath, sheet_name=sheet_name, engine="openpyxl")
     headers = list(df.columns)
 
     # Safety check — if this looks like a schema file, warn but proceed
@@ -141,6 +154,10 @@ def load_excel_to_raw(
     for idx, row in df.iterrows():
         kwargs: Dict[str, Any] = {"row_number": int(idx) + 1}
 
+        # source_file (present on RawDocket; absent on other RAW models)
+        if hasattr(model_class, "source_file"):
+            kwargs["source_file"] = filepath.name
+
         # Mapped columns
         for excel_col, canonical in col_map.items():
             kwargs[canonical] = _safe_str(row.get(excel_col))
@@ -166,27 +183,41 @@ def load_excel_to_raw(
 
 DATA_DIR = Path("/mnt/data")
 
-# Files whose rows are *schema metadata* (column definitions).
+# Each XLSX file has two sheets:
+#   Sheet 0  = actual data rows       → DATA_FILE_CONFIG  (load_excel_to_raw)
+#   Sheet 1  = column definitions      → SCHEMA_FILE_CONFIG (load_schema_to_raw)
+
 SCHEMA_FILE_CONFIG = [
-    {"glob": "Docket_Table*.xlsx", "label": "docket_schema"},
+    {"glob": "Case_Table*.xlsx",         "label": "case_schema",      "sheet": "Field Names, Types, Labels"},
+    {"glob": "Docket_Table*.xlsx",       "label": "docket_schema",    "sheet": "Field Names, Types"},
+    {"glob": "Document_Table*.xlsx",     "label": "document_schema",  "sheet": "Field Names, Types, Labels"},
+    {"glob": "Secondary_Source*.xlsx",   "label": "secondary_schema", "sheet": "Field Names, Types, Labels"},
 ]
 
-# Files whose rows are *actual data*.
 DATA_FILE_CONFIG = [
     {
         "glob": "Case_Table*.xlsx",
         "model": RawCase,
         "aliases": CASE_ALIASES,
+        "sheet": 0,
+    },
+    {
+        "glob": "Docket_Table*.xlsx",
+        "model": RawDocket,
+        "aliases": DOCKET_ALIASES,
+        "sheet": 0,
     },
     {
         "glob": "Document_Table*.xlsx",
         "model": RawDocument,
         "aliases": DOCUMENT_ALIASES,
+        "sheet": 0,
     },
     {
         "glob": "Secondary_Source*.xlsx",
         "model": RawSecondarySource,
         "aliases": SECONDARY_SOURCE_ALIASES,
+        "sheet": 0,
     },
 ]
 
@@ -195,29 +226,30 @@ def load_all_raw(session: Session, data_dir: Path = DATA_DIR) -> Dict[str, int]:
     """
     Load every recognised Excel file from *data_dir*.
 
-    Schema-metadata files   → ``raw_schema_field``
-    Data files              → ``raw_document`` / ``raw_secondary_source``
+    Each workbook has two sheets:
+      Sheet 0 → actual data rows  → DATA_FILE_CONFIG models
+      Sheet 1 → column definitions → raw_schema_field
     """
     results: Dict[str, int] = {}
 
-    # ── Schema files ─────────────────────────────────────────────────
+    # ── Schema files (metadata sheet of each workbook) ────────────────
     for cfg in SCHEMA_FILE_CONFIG:
         matches = sorted(data_dir.glob(cfg["glob"]))
         if not matches:
             logger.warning("No schema file matching %s in %s", cfg["glob"], data_dir)
             continue
         fpath = matches[-1]
-        count = load_schema_to_raw(session, fpath)
+        count = load_schema_to_raw(session, fpath, sheet_name=cfg["sheet"])
         results[f"{fpath.name} (schema)"] = count
 
-    # ── Data files ───────────────────────────────────────────────────
+    # ── Data files (data sheet of each workbook) ──────────────────────
     for cfg in DATA_FILE_CONFIG:
         matches = sorted(data_dir.glob(cfg["glob"]))
         if not matches:
             logger.warning("No data file matching %s in %s", cfg["glob"], data_dir)
             continue
         fpath = matches[-1]
-        count = load_excel_to_raw(session, fpath, cfg["model"], cfg["aliases"])
+        count = load_excel_to_raw(session, fpath, cfg["model"], cfg["aliases"], sheet_name=cfg["sheet"])
         results[fpath.name] = count
 
     return results

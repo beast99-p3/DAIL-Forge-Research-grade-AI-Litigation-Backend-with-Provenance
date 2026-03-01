@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from db.models import (
     Case, CaseTag, ChangeLog, Docket, Document, SecondarySource, Tag,
-    RawDocument, RawSecondarySource, RawCase,
+    RawDocument, RawSecondarySource, RawCase, RawDocket,
 )
 from pipeline.column_map import CASE_ALIASES, build_column_map
 
@@ -479,6 +479,46 @@ def transform_secondary_sources(session: Session) -> int:
     return count
 
 
+def transform_dockets(session: Session) -> int:
+    """
+    Transform raw docket rows from ``raw_docket`` → ``dockets``.
+
+    Returns the number of docket entries created.
+    """
+    # Idempotency: skip if curated dockets already exist
+    if session.query(Docket).count() > 0:
+        existing = session.query(Docket).count()
+        logger.info("dockets table already has %d rows – skipping transform", existing)
+        return existing
+
+    raws = session.query(RawDocket).all()
+    if not raws:
+        logger.info("No raw_docket data found – skipping docket transform")
+        return 0
+
+    count = 0
+    for raw in raws:
+        case_pk = _resolve_case_pk(session, raw.case_id)
+        if not case_pk:
+            logger.warning(
+                "Orphan docket row %d: case_id=%s not found",
+                raw.row_number, raw.case_id,
+            )
+            continue
+        session.add(Docket(
+            case_id=case_pk,
+            docket_number=raw.docket_number,
+            entry_date=parse_date(raw.entry_date),
+            entry_text=raw.entry_text,
+            filed_by=raw.filed_by,
+        ))
+        count += 1
+
+    session.commit()
+    logger.info("Transformed %d dockets", count)
+    return count
+
+
 def transform_all(session: Session, run_id: Optional[str] = None) -> dict[str, int]:
     """
     Run the full RAW → CURATED transform pipeline.
@@ -492,6 +532,7 @@ def transform_all(session: Session, run_id: Optional[str] = None) -> dict[str, i
     3. Enrich cases from extra_fields (court, plaintiff, tags, etc.)
     4. Transform documents
     5. Transform secondary sources
+    6. Transform dockets
     """
     return {
         "real_cases": transform_cases(session, run_id=run_id),
@@ -499,4 +540,5 @@ def transform_all(session: Session, run_id: Optional[str] = None) -> dict[str, i
         "cases_enriched": enrich_cases_from_raw_documents(session, run_id=run_id),
         "documents": transform_documents(session),
         "secondary_sources": transform_secondary_sources(session),
+        "dockets": transform_dockets(session),
     }

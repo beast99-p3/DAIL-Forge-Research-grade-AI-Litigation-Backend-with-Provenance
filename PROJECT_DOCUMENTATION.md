@@ -27,12 +27,16 @@
 6. **Incremental data loading** - Re-process source files without duplicating unchanged rows
 7. **Dataset versioning** - Take point-in-time snapshots and compare them over time
 
-### Key Innovation: Schema-Aware Processing
-The pipeline intelligently distinguishes between:
-- **Schema metadata files** (Case_Table, Docket_Table) - Define column structures
-- **Actual data files** (Document_Table, Secondary_Source_Coverage_Table) - Contain records
+### Key Innovation: Schema-Aware Two-Sheet Processing
+Every DAIL Excel export has **two sheets**:
+- **Sheet 0** — actual data (cases, dockets, documents, sources)
+- **Sheet 1** — column definitions (`Name`, `DataType`, `Unique`, `Label`)
 
-This critical discovery prevents misprocessing schema definitions as case records.
+The pipeline reads both sheets from each file:
+- Sheet 0 → the appropriate `raw_*` table via fuzzy column mapping
+- Sheet 1 → `raw_schema_field` (replaced on every run to stay current)
+
+This was previously mishandled: `Docket_Table` was treated as a schema-only file, causing 389 docket records to be silently discarded. The pipeline now correctly loads all four data tables.
 
 ---
 
@@ -85,6 +89,11 @@ Preserves Excel exports verbatim for audit and reprocessing.
 - `row_number` tracks source file position
 - `loaded_at` timestamp for audit trail
 - `row_checksum` SHA-256 fingerprint of row content (used by delta loader)
+
+**Two-Sheet Workbook Structure:**
+Every Excel file has exactly two sheets:
+- **Sheet 0** (named after the table, e.g. `Case_Table_*`) — actual data rows → loaded into the appropriate `raw_*` table
+- **Sheet 1** (`Field Names, Types, Labels` or `Field Names, Types`) — column definitions → loaded into `raw_schema_field`
 
 #### 2. **CURATED Layer** (Research-Ready Data)
 Normalized, validated, and enriched data for analysis.
@@ -232,14 +241,18 @@ change_log:
 **Step 2: Excel → RAW Tables**
 ```python
 For each .xlsx file in ./data/:
-  if file matches "Case_Table" or "Docket_Table":
-    → Parse as schema metadata → raw_schema_field
-  elif file matches "Case_Table":
-    → Load as actual data → raw_case
+  # Sheet 0 → actual data
+  if file matches "Case_Table":
+    → Parse as case data (sheet 0)    → raw_case
+  elif file matches "Docket_Table":
+    → Parse as docket data (sheet 0)  → raw_docket
   elif file matches "Document_Table":
-    → Load as records → raw_document
+    → Parse as records (sheet 0)      → raw_document
   elif file matches "Secondary_Source":
-    → Load as records → raw_secondary_source
+    → Parse as records (sheet 0)      → raw_secondary_source
+    
+  # Sheet 1 → column definitions (always reloaded)
+  Load "Field Names, Types, Labels" sheet → raw_schema_field
     
 # Unmapped columns → extra_fields (JSON)
 # Fuzzy column name matching via column_map.py
@@ -265,11 +278,14 @@ for case_num in (unique_numbers - existing_cases):
 
 **Step 4: RAW → CURATED Transform**
 ```python
-# Transform real cases (if raw_case has data)
-transform_cases() → creates real Case records with full metadata
+# Transform real cases from raw_case → cases (full metadata + tags)
+transform_cases()  → creates real Case records from Case_Table data
+
+# Synthesize stub cases for any Case_Number refs not in raw_case
+synthesize_stub_cases() → adds is_stub=True placeholders
 
 # Enrich stub cases from raw_document.extra_fields
-enrich_stubs_from_documents() → adds court, case names from doc metadata
+enrich_cases_from_raw_documents() → adds court, case names, tags
 
 # Transform documents
 for doc in raw_document:
@@ -282,6 +298,12 @@ for source in raw_secondary_source:
     parse_dates(source.publication_date)
     link_to_case(source.case_id)
     → secondary_sources
+
+# Transform dockets from raw_docket → dockets
+for docket in raw_docket:
+    parse_dates(docket.entry_date)
+    link_to_case(docket.case_id)
+    → dockets
 
 # Process tags from multi-select fields
 split_and_normalize_tags(raw.issue_list) → tags + case_tags
@@ -848,11 +870,11 @@ docker compose down -v       # Stop and remove volumes (DELETES DATA)
 | Metric | Count | Notes |
 |--------|-------|-------|
 | Total Cases | 880 | 375 real + 505 stubs |
-| Real Cases | 375 | From Case_Table.xlsx |
-| Stub Cases | 505 | Synthesized from FK references |
+| Real Cases | 375 | From Case_Table.xlsx (sheet 0) |
+| Stub Cases | 505 | Synthesized from FK references not in Case_Table |
 | Documents | 863 | Court filings, motions, opinions |
 | Secondary Sources | 389 | News articles, academic papers |
-| Dockets | 0 | Awaiting docket data export |
+| Dockets | 389 | From Docket_Table.xlsx (sheet 0) |
 | Tags | 430 | Controlled vocabulary terms |
 | Case-Tag Links | ~2,000+ | Many-to-many associations |
 | Change Log Entries | 1,272 | Complete audit trail |
@@ -1193,6 +1215,7 @@ All migrations tracked in `db/migrations/versions/` and applied automatically by
 7. `0007_geo_views_citations.py` - Geographic helpers, saved views, citations
 8. `0008_incremental_delta.py` - `row_checksum` on RAW tables + `raw_delta_log` table
 9. `0009_snapshots.py` - `curated_snapshots` + `snapshot_cases` tables
+10. `0010_raw_docket_table.py` - `raw_docket` table (docket data correctly separated from schema metadata)
 
 ### External Resources
 - **PostgreSQL Documentation**: https://www.postgresql.org/docs/15/
