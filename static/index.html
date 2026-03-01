@@ -162,6 +162,9 @@ td.wrap{white-space:normal;max-width:300px}
 .terminal-help .params{color:var(--text2)}
 .terminal-export-btn{background:var(--green);color:#fff;border:none;padding:.25rem .5rem;border-radius:4px;font-size:.75rem;margin-left:.5rem;cursor:pointer}
 .terminal-export-btn:hover{opacity:.85}
+.fts-hint{cursor:help;color:var(--accent);font-size:.72rem;vertical-align:super;margin-left:.2rem;text-decoration:none}
+mark{background:rgba(255,167,38,.25);color:var(--orange);padding:0 .15rem;border-radius:2px}
+.fts-badge{background:rgba(96,165,250,.12);color:var(--accent);border:1px solid rgba(96,165,250,.35);border-radius:4px;font-size:.65rem;padding:.05rem .35rem;vertical-align:middle;margin-left:.35rem}
 
 /* ── Responsive ─────────────────────────────────────────────────── */
 @media(max-width:768px){
@@ -185,6 +188,8 @@ td.wrap{white-space:normal;max-width:300px}
     <button data-page="cases">📁 <span class="label">Cases</span></button>
     <button data-page="provenance">🔗 <span class="label">Provenance</span></button>
     <button data-page="curate">✏️ <span class="label">Curate</span></button>
+    <button data-page="pipeline">⚡ <span class="label">Pipeline</span></button>
+    <button data-page="snapshots">📈 <span class="label">Snapshots</span></button>
     <button data-page="architecture">🏗️ <span class="label">Architecture</span></button>
     <button onclick="window.open('/docs','_blank')">📄 <span class="label">API Docs</span></button>
   </nav>
@@ -272,8 +277,15 @@ td.wrap{white-space:normal;max-width:300px}
   <h2 style="margin-bottom:1rem;color:#fff">Cases Browser</h2>
   <div class="filters">
     <div class="filter-group"><label>Keyword</label><input type="text" id="f-keyword" placeholder="Search name, parties…"></div>
+    <div class="filter-group">
+      <label>Legal FTS <abbr class="fts-hint" title='Full-text search. Supports: AND (default), OR, NOT, "phrases". E.g.: "facial recognition" AND NOT employment'>ⓘ</abbr></label>
+      <input type="text" id="f-fts" placeholder='"facial rec" AND NOT employment'>
+    </div>
     <div class="filter-group"><label>Court</label><input type="text" id="f-court" placeholder="e.g. district"></div>
     <div class="filter-group"><label>Status</label><input type="text" id="f-status" placeholder="e.g. open"></div>
+    <div class="filter-group"><label>State <abbr class="fts-hint" title="2-letter US state abbreviation, e.g. CA">ⓘ</abbr></label><input type="text" id="f-state" placeholder="e.g. CA" maxlength="2"></div>
+    <div class="filter-group"><label>Circuit <abbr class="fts-hint" title="Federal circuit, e.g. 9th or 2nd">ⓘ</abbr></label><input type="text" id="f-circuit" placeholder="e.g. 9th"></div>
+    <div class="filter-group"><label>Citation <abbr class="fts-hint" title="Legal citation fragment (fuzzy), e.g. 538 U.S. 343">ⓘ</abbr></label><input type="text" id="f-cite" placeholder="e.g. 538 U.S. 343"></div>
     <div class="filter-group"><label>Tag Type</label>
       <select id="f-tag-type"><option value="">All</option><option>issue</option><option>area</option><option>cause</option><option>algorithm</option><option>harm</option></select>
     </div>
@@ -283,7 +295,9 @@ td.wrap{white-space:normal;max-width:300px}
     <button class="btn btn-primary" onclick="searchCases()">🔍 Search</button>
     <button class="btn btn-secondary" onclick="resetFilters()">Clear</button>
     <button class="btn btn-secondary" onclick="exportCSV()">⬇ CSV</button>
+    <button class="btn btn-secondary" onclick="loadFacets()">📊 Facets</button>
   </div>
+  <div id="facets-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:.5rem;padding:1rem;margin-bottom:1rem"></div>
   <div id="cases-table"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
   <div id="cases-pagination" class="pagination"></div>
 </div>
@@ -353,6 +367,56 @@ td.wrap{white-space:normal;max-width:300px}
       <div class="form-group"><label>Description</label><input id="ci-desc" placeholder="Brief description"></div>
       <button class="btn btn-success" onclick="submitCitation()">Create Citation</button>
     </div>
+  </div>
+</div>
+
+<!-- ─── Pipeline ──────────────────────────────────────────────── -->
+<div id="page-pipeline" class="page">
+  <h2 style="margin-bottom:.5rem;color:#fff">⚡ Pipeline Control</h2>
+  <p style="color:var(--text2);margin-bottom:1.25rem">Trigger data loads from the mounted Excel files. All endpoints require the API key.</p>
+  <div class="form-group" style="max-width:360px"><label>API Key</label><input type="password" id="pl-apikey" value="dail-forge-secret-key-change-me"></div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+    <!-- Full reload -->
+    <div class="card">
+      <h3>🔄 Full Reload</h3>
+      <p style="color:var(--text2);font-size:.85rem;margin:.5rem 0 1rem">Loads all RAW tables from Excel, then runs the full transform + validate pipeline. Takes an automatic curated-layer snapshot on success.</p>
+      <button class="btn btn-primary" onclick="runPipeline('full')">Run Full Load</button>
+      <div id="pl-full-result" style="margin-top:1rem"></div>
+    </div>
+
+    <!-- Delta / incremental -->
+    <div class="card" style="border-color:var(--green)">
+      <h3 style="color:var(--green)">Δ Incremental Delta Load <span style="font-size:.7rem;font-weight:400;background:var(--green);color:#000;padding:.15rem .4rem;border-radius:.3rem;margin-left:.4rem">NEW</span></h3>
+      <p style="color:var(--text2);font-size:.85rem;margin:.5rem 0 1rem">
+        Computes a <strong>per-row SHA-256 checksum</strong> for every Excel row and only writes rows that are new or changed. Every processed row produces a
+        <code>RawDeltaLog</code> entry (<em>insert</em> / <em>update</em> / <em>skip</em>) for complete provenance.
+        Transforms the curated layer only when at least one raw row changed, then auto-snapshots.
+      </p>
+      <button class="btn btn-success" onclick="runPipeline('delta')">Run Delta Load</button>
+      <div id="pl-delta-result" style="margin-top:1rem"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Snapshots ─────────────────────────────────────────────── -->
+<div id="page-snapshots" class="page">
+  <h2 style="margin-bottom:.5rem;color:#fff">📈 Data Versioning &amp; Snapshots</h2>
+  <p style="color:var(--text2);margin-bottom:1rem">Every pipeline run automatically freezes a point-in-time copy of the curated layer. Use <strong>Diff</strong> to see exactly what changed between any two snapshots.</p>
+
+  <div style="display:flex;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center">
+    <button class="btn btn-primary" onclick="loadSnapshots()">&#8635; Refresh</button>
+    <input type="password" id="snap-apikey" value="dail-forge-secret-key-change-me" style="width:220px">
+    <input type="text" id="snap-label" placeholder="Snapshot label" style="width:180px">
+    <button class="btn btn-success" onclick="takeSnapshot()">&#43; Take Snapshot Now</button>
+  </div>
+
+  <div id="snapshots-list"><div class="loading-overlay"><div class="spinner"></div> Loading…</div></div>
+
+  <!-- Diff panel -->
+  <div id="diff-panel" style="display:none;margin-top:1.5rem">
+    <h3 style="color:#fff;margin-bottom:.75rem">🔍 Snapshot Diff</h3>
+    <div id="diff-content"></div>
   </div>
 </div>
 
@@ -480,6 +544,7 @@ function showPage(name) {
   if (page) page.classList.add('active');
   const navBtn = document.querySelector(`#nav button[data-page="${name}"]`);
   if (navBtn) navBtn.classList.add('active');
+  if (name === 'snapshots') loadSnapshots();
 }
 
 // ── Toast ────────────────────────────────────────────────────────
@@ -608,15 +673,23 @@ const PAGE_SIZE = 15;
 
 async function searchCases(page = 1) {
   currentPage = page;
+  const ftsVal = document.getElementById('f-fts').value;
+  const kwVal  = document.getElementById('f-keyword').value;
   const params = {
-    keyword: document.getElementById('f-keyword').value,
-    court: document.getElementById('f-court').value,
-    status: document.getElementById('f-status').value,
-    tag_type: document.getElementById('f-tag-type').value,
+    ...(ftsVal ? { fts_query: ftsVal } : {}),
+    ...(kwVal  ? { keyword:   kwVal  } : {}),
+    court:     document.getElementById('f-court').value,
+    status:    document.getElementById('f-status').value,
+    state:     document.getElementById('f-state').value,
+    circuit:   document.getElementById('f-circuit').value,
+    cite:      document.getElementById('f-cite').value,
+    tag_type:  document.getElementById('f-tag-type').value,
     tag_value: document.getElementById('f-tag-value').value,
     date_from: document.getElementById('f-date-from').value,
-    date_to: document.getElementById('f-date-to').value,
-    page, page_size: PAGE_SIZE, sort_by: 'id', sort_dir: 'asc',
+    date_to:   document.getElementById('f-date-to').value,
+    page, page_size: PAGE_SIZE,
+    // When FTS is active omit sort_by so the API ranks by relevance
+    ...(ftsVal ? {} : { sort_by: 'id', sort_dir: 'asc' }),
   };
 
   document.getElementById('cases-table').innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Searching…</div>';
@@ -629,7 +702,9 @@ async function searchCases(page = 1) {
       return;
     }
 
-    let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Case ID</th><th>Name</th><th>Court</th><th>Filed</th><th>Status</th><th>Tags</th><th></th></tr></thead><tbody>';
+    const ftsModeActive = ftsVal;
+      const relevanceBadge = ftsModeActive ? ' <span class="fts-badge">ranked by relevance</span>' : '';
+      let html = `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Case ID</th><th>Name${relevanceBadge}</th><th>Court</th><th>Filed</th><th>Status</th><th>Tags</th><th></th></tr></thead><tbody>`;
     for (const c of data.items) {
       const tagsHtml = (c.tags || []).map(tagHtml).join(' ') || '—';
       const stubBadge = c.is_stub ? '<span class="tag tag-default" style="font-size:.65rem">STUB</span> ' : '';
@@ -661,7 +736,7 @@ async function searchCases(page = 1) {
 }
 
 function resetFilters() {
-  ['f-keyword','f-court','f-status','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
+  ['f-keyword','f-fts','f-court','f-status','f-state','f-circuit','f-cite','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -670,16 +745,84 @@ function resetFilters() {
 }
 
 function exportCSV() {
+  const ftsVal = document.getElementById('f-fts').value;
   const params = {
-    keyword: document.getElementById('f-keyword').value,
-    court: document.getElementById('f-court').value,
-    status: document.getElementById('f-status').value,
-    tag_type: document.getElementById('f-tag-type').value,
+    keyword:   document.getElementById('f-keyword').value,
+    ...(ftsVal ? { fts_query: ftsVal } : {}),
+    court:     document.getElementById('f-court').value,
+    status:    document.getElementById('f-status').value,
+    state:     document.getElementById('f-state').value,
+    circuit:   document.getElementById('f-circuit').value,
+    cite:      document.getElementById('f-cite').value,
+    tag_type:  document.getElementById('f-tag-type').value,
     tag_value: document.getElementById('f-tag-value').value,
     date_from: document.getElementById('f-date-from').value,
-    date_to: document.getElementById('f-date-to').value,
+    date_to:   document.getElementById('f-date-to').value,
   };
   window.open(API + '/export/cases.csv' + qs(params), '_blank');
+}
+
+async function loadFacets() {
+  const panel = document.getElementById('facets-panel');
+  const ftsVal = document.getElementById('f-fts').value;
+  const params = {
+    keyword:   document.getElementById('f-keyword').value,
+    ...(ftsVal ? { fts_query: ftsVal } : {}),
+    court:     document.getElementById('f-court').value,
+    status:    document.getElementById('f-status').value,
+    state:     document.getElementById('f-state').value,
+    circuit:   document.getElementById('f-circuit').value,
+    cite:      document.getElementById('f-cite').value,
+    tag_type:  document.getElementById('f-tag-type').value,
+    tag_value: document.getElementById('f-tag-value').value,
+    date_from: document.getElementById('f-date-from').value,
+    date_to:   document.getElementById('f-date-to').value,
+  };
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading facets…</div>';
+  try {
+    const f = await api('/cases/facets' + qs(params));
+    const renderSection = (label, buckets) => {
+      if (!buckets || !buckets.length) return '';
+      const items = buckets.map(b =>
+        `<span class="tag tag-default" style="cursor:pointer" title="${b.count} cases"
+          onclick="applyFacet('${label}','${escHtml(b.value)}')">
+          ${escHtml(b.value)} <sup>${b.count}</sup>
+        </span>`
+      ).join(' ');
+      return `<div style="margin-bottom:.6rem"><strong style="color:var(--text2);font-size:.8rem;text-transform:uppercase">${label}</strong><br>${items}</div>`;
+    };
+    const applyMap = { 'Court': 'f-court', 'Status': 'f-status', 'Outcome': null,
+                       'Year': 'f-date-from', 'Circuit': 'f-circuit', 'State': 'f-state', 'Tag Type': 'f-tag-type' };
+    panel.innerHTML =
+      renderSection('Court',   f.courts)   +
+      renderSection('Status',  f.statuses) +
+      renderSection('Outcome', f.outcomes) +
+      renderSection('Year',    f.filing_years) +
+      renderSection('Circuit', f.circuits) +
+      renderSection('State',   f.states)   +
+      renderSection('Tag Type',f.tag_types) +
+      '<button class="btn btn-sm btn-secondary" onclick="document.getElementById(\"facets-panel\").style.display=\"none\"">Close facets</button>';
+  } catch(e) {
+    panel.innerHTML = `<div class="empty-state">Error loading facets: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function applyFacet(dimension, value) {
+  const map = {
+    'Court': 'f-court', 'Status': 'f-status', 'Circuit': 'f-circuit',
+    'State': 'f-state', 'Tag Type': 'f-tag-type',
+  };
+  const id = map[dimension];
+  if (id) {
+    const el = document.getElementById(id);
+    if (el.tagName === 'SELECT') {
+      for (let i=0;i<el.options.length;i++) if (el.options[i].value===value) { el.selectedIndex=i; break; }
+    } else {
+      el.value = value;
+    }
+    searchCases(1);
+  }
 }
 
 // ── Case Detail ──────────────────────────────────────────────────
@@ -1018,22 +1161,31 @@ async function executeCommand(input) {
     terminalPrint(`
       <div class="result-header">Available Commands:</div>
       <div style="margin-left:1rem;line-height:2">
-        <strong style="color:var(--green)">help</strong> - Show this help message<br>
-        <strong style="color:var(--green)">clear</strong> - Clear the terminal<br>
-        <strong style="color:var(--green)">stats</strong> - Show database statistics<br>
-        <strong style="color:var(--green)">search [query]</strong> - Search cases with filters<br>
-        <strong style="color:var(--green)">show case [id]</strong> - Display full details for a specific case<br>
-        <strong style="color:var(--green)">export csv</strong> - Export last results as CSV<br>
-        <strong style="color:var(--green)">export json</strong> - Export last results as JSON<br>
+        <strong style="color:var(--green)">help</strong> — Show this help message<br>
+        <strong style="color:var(--green)">clear</strong> — Clear the terminal<br>
+        <strong style="color:var(--green)">stats</strong> — Show database statistics<br>
+        <strong style="color:var(--green)">show case [id]</strong> — Display full details for a specific case<br>
+        <strong style="color:var(--green)">fts [query]</strong> — <span style="color:var(--accent)">Cross-table legal FTS</span> — searches cases + documents + sources<br>
+        <strong style="color:var(--green)">export csv</strong> — Export last results as CSV<br>
+        <strong style="color:var(--green)">export json</strong> — Export last results as JSON<br>
+      </div>
+      <div class="result-header" style="margin-top:1rem">Full-Text Search Syntax (fts command &amp; natural language):</div>
+      <div style="margin-left:1rem;line-height:2;color:var(--text2)">
+        • <em>fts privacy</em> — single term<br>
+        • <em>fts facial recognition</em> — implicit AND<br>
+        • <em>fts "facial recognition"</em> — exact phrase<br>
+        • <em>fts privacy OR surveillance</em> — either term<br>
+        • <em>fts privacy NOT employment</em> — negation<br>
+        • <em>fts "facial recognition" AND NOT employment</em> — combined<br>
       </div>
       <div class="result-header" style="margin-top:1rem">Natural Language Examples:</div>
       <div style="margin-left:1rem;line-height:2;color:var(--text2)">
         • <em>"cases about privacy in California"</em><br>
         • <em>"show cases filed after 2022-01-01"</em><br>
         • <em>"list cases with status active"</em><br>
-        • <em>"find cases about employment discrimination and AI"</em><br>
-        • <em>"cases in 9th circuit"</em><br>
-        • <em>"search facial recognition cases"</em><br>
+        • <em>"find cases about employment discrimination"</em><br>
+        • <em>"cases in 9th circuit after 2021"</em><br>
+        • <em>"facial recognition cases"</em><br>
       </div>
     `);
     return;
@@ -1145,8 +1297,45 @@ async function executeCommand(input) {
     return;
   }
   
+  // fts command: cross-table full-text search
+  if (cmd.startsWith('fts ') || cmd.startsWith('search ')) {
+    const q = input.replace(/^(?:fts|search)\s+/i, '').trim();
+    if (!q) { terminalPrint('Usage: fts <query>', 'error'); return; }
+    await executeFtsSearch(q);
+    return;
+  }
+
   // Natural language search parsing
   await executeSearch(input);
+}
+
+async function executeFtsSearch(q) {
+  try {
+    terminalPrint(`<span style="color:var(--text2)">Searching cases, documents &amp; sources for: <em>${escHtml(q)}</em></span>`);
+    const data = await api(`/search${qs({ q, page_size: 15 })}`);
+    if (!data.items.length) {
+      terminalPrint('No results found.', 'error');
+      return;
+    }
+    let html = `<div class="result-header">Found ${data.total} result(s) across cases, documents &amp; sources:</div>`;
+    html += `<div style="margin-left:1rem;margin-top:.5rem">`;
+    for (const hit of data.items) {
+      const typeColor = hit.hit_type === 'case' ? 'var(--accent)' : hit.hit_type === 'document' ? 'var(--green)' : 'var(--orange)';
+      html += `<div style="border-bottom:1px solid var(--border);padding:.5rem 0;line-height:1.6">`;
+      html += `<span style="color:${typeColor};font-size:.7rem;text-transform:uppercase;font-weight:700">${escHtml(hit.hit_type)}</span> `;
+      html += `<strong style="color:var(--accent)">${escHtml(hit.title)}</strong>`;
+      html += ` <span style="color:var(--text2);font-size:.8rem">case: ${escHtml(hit.case_ref)}</span>`;
+      if (hit.court) html += ` <span style="color:var(--text2);font-size:.8rem">· ${escHtml(hit.court)}</span>`;
+      html += ` <span style="color:var(--text2);font-size:.72rem;float:right">rank ${hit.rank.toFixed(4)}</span>`;
+      if (hit.snippet) html += `<br><span style="font-size:.8rem;color:var(--text2)">${hit.snippet}</span>`;
+      if (hit.url) html += `<br><a href="${escHtml(hit.url)}" target="_blank" style="color:var(--accent2);font-size:.78rem">${escHtml(hit.url)}</a>`;
+      html += `</div>`;
+    }
+    html += `</div><div style="margin-top:.5rem;color:var(--text2);font-size:.82rem">Showing top ${data.items.length} of ${data.total}. Use <strong>fts "${escHtml(q)}"</strong> for more.</div>`;
+    terminalPrint(html, 'success');
+  } catch (e) {
+    terminalPrint(`Error: ${e.message}`, 'error');
+  }
 }
 
 async function executeSearch(query) {
@@ -1230,7 +1419,8 @@ function parseNaturalLanguageQuery(query) {
     if (match && match[1]) {
       const kw = match[1].trim();
       if (kw && !kw.match(/^\d{4}/) && kw.length > 2) {
-        params.keyword = kw;
+        // Always route to fts_query for ranking; websearch_to_tsquery handles simple words too
+        params.fts_query = kw;
         break;
       }
     }
@@ -1254,7 +1444,7 @@ function parseNaturalLanguageQuery(query) {
   
   for (const [pattern, value] of Object.entries(tagPatterns)) {
     if (lower.includes(pattern)) {
-      params.keyword = params.keyword || value;
+      params.fts_query = params.fts_query || value;
       break;
     }
   }
@@ -1263,6 +1453,159 @@ function parseNaturalLanguageQuery(query) {
 }
 
 // ── Init ─────────────────────────────────────────────────────────
+// ── Pipeline Control ─────────────────────────────────────────────
+async function runPipeline(mode) {
+  const apiKey = document.getElementById('pl-apikey').value;
+  const resultEl = document.getElementById(`pl-${mode}-result`);
+  resultEl.innerHTML = '<div class="loading-overlay" style="position:relative;height:3rem"><div class="spinner"></div></div>';
+  try {
+    const endpoint = mode === 'delta' ? '/pipeline/load-delta' : '/pipeline/load';
+    const resp = await fetch(API + endpoint, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+
+    let html = `<div style="color:var(--green);font-weight:600">✅ ${data.status} &nbsp;·&nbsp; run ${data.run_id.slice(0,8)}</div>`;
+    if (data.snapshot_id) html += `<div style="color:var(--text2);font-size:.8rem;margin-top:.3rem">📸 Snapshot #${data.snapshot_id} taken — <a href="#" onclick="showPage('snapshots');loadSnapshots();return false">view in Snapshots</a></div>`;
+
+    if (mode === 'delta' && data.delta) {
+      const d = data.delta;
+      html += `<div style="margin-top:.6rem;font-size:.85rem">
+        <span style="color:var(--green)">+${d.inserted} inserted</span> &nbsp;
+        <span style="color:var(--orange)">${d.updated} updated</span> &nbsp;
+        <span style="color:var(--text2)">${d.skipped} skipped</span>
+        &nbsp;/ ${d.total_rows_scanned} rows scanned
+      </div>`;
+      // Per-file breakdown
+      if (d.by_file && Object.keys(d.by_file).length) {
+        html += `<table style="margin-top:.5rem;font-size:.78rem;width:100%"><thead><tr><th>File</th><th>Insert</th><th>Update</th><th>Skip</th></tr></thead><tbody>`;
+        for (const [fname, counts] of Object.entries(d.by_file)) {
+          html += `<tr><td>${escHtml(fname)}</td><td style="color:var(--green)">${counts.insert??0}</td><td style="color:var(--orange)">${counts.update??0}</td><td style="color:var(--text2)">${counts.skip??0}</td></tr>`;
+        }
+        html += `</tbody></table>`;
+      }
+    } else if (data.raw_loaded) {
+      html += `<div style="margin-top:.4rem;font-size:.8rem;color:var(--text2)">Raw: ${JSON.stringify(data.raw_loaded)}</div>`;
+    }
+
+    if (data.validation_issues && data.validation_issues.length) {
+      const errs = data.validation_issues.filter(i => i.level==='error');
+      const warns = data.validation_issues.filter(i => i.level==='warning');
+      if (errs.length)  html += `<div style="color:var(--red);font-size:.8rem;margin-top:.3rem">${errs.length} error(s)</div>`;
+      if (warns.length) html += `<div style="color:var(--orange);font-size:.8rem">${warns.length} warning(s)</div>`;
+    }
+
+    resultEl.innerHTML = html;
+    toast(`Pipeline ${mode} complete`, 'success');
+    loadDashboard();
+  } catch (e) {
+    resultEl.innerHTML = `<div style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
+    toast(e.message, 'error');
+  }
+}
+
+// ── Snapshots ─────────────────────────────────────────────────────
+async function loadSnapshots() {
+  const el = document.getElementById('snapshots-list');
+  el.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Loading…</div>';
+  try {
+    const snaps = await api('/snapshots?limit=100');
+    if (!snaps.length) {
+      el.innerHTML = '<div class="empty-state"><div class="icon">📸</div>No snapshots yet — run a pipeline to create one automatically.</div>';
+      return;
+    }
+    let html = '<div class="table-wrap"><table><thead><tr><th>ID</th><th>Label</th><th>Taken At</th><th>Cases</th><th>Docs</th><th>Tags</th><th>Type</th><th></th></tr></thead><tbody>';
+    for (const s of snaps) {
+      const badge = s.is_auto
+        ? '<span class="tag tag-default" style="font-size:.65rem">auto</span>'
+        : '<span class="tag tag-issue" style="font-size:.65rem">manual</span>';
+      html += `<tr>
+        <td>${s.id}</td>
+        <td class="wrap">${escHtml(s.label)}</td>
+        <td>${new Date(s.taken_at).toLocaleString()}</td>
+        <td>${s.case_count}</td>
+        <td>${s.doc_count}</td>
+        <td>${s.tag_count}</td>
+        <td>${badge}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="showDiff(${s.id})">Diff ↗</button></td>
+      </tr>`;
+    }
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
+async function takeSnapshot() {
+  const apiKey = document.getElementById('snap-apikey').value;
+  const label  = document.getElementById('snap-label').value.trim();
+  if (!label) { toast('Enter a snapshot label', 'error'); return; }
+  try {
+    const resp = await fetch(API + '/snapshots', {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || resp.statusText);
+    toast(`Snapshot #${data.id} created`, 'success');
+    document.getElementById('snap-label').value = '';
+    loadSnapshots();
+  } catch(e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function showDiff(snapId) {
+  const panel = document.getElementById('diff-panel');
+  const content = document.getElementById('diff-content');
+  panel.style.display = 'block';
+  content.innerHTML = '<div class="loading-overlay" style="position:relative;height:4rem"><div class="spinner"></div></div>';
+  panel.scrollIntoView({ behavior: 'smooth' });
+  try {
+    const d = await api(`/snapshots/${snapId}/diff`);
+    const prevLabel = d.prev_snapshot_label ? `#${d.prev_snapshot_id} – ${escHtml(d.prev_snapshot_label)}` : '<em>none (first snapshot)</em>';
+    let html = `<div style="margin-bottom:.75rem">
+      <strong style="color:#fff">Snapshot #${d.snapshot_id}</strong> — ${escHtml(d.snapshot_label)}<br>
+      <span style="color:var(--text2);font-size:.82rem">vs ${prevLabel}</span>
+    </div>
+    <div style="display:flex;gap:1.5rem;margin-bottom:1rem;font-size:.9rem">
+      <span style="color:var(--green)">+${d.added_count} added</span>
+      <span style="color:var(--red)">−${d.removed_count} removed</span>
+      <span style="color:var(--orange)">${d.changed_count} changed</span>
+      <span style="color:var(--text2)">${d.unchanged_count} unchanged</span>
+    </div>`;
+
+    if (d.cases && d.cases.length) {
+      html += '<div class="table-wrap"><table><thead><tr><th>Action</th><th>Case PK</th><th>Case ID</th><th>Case Name</th><th>Changed Fields</th></tr></thead><tbody>';
+      for (const c of d.cases) {
+        const color = c.action==='added' ? 'var(--green)' : c.action==='removed' ? 'var(--red)' : 'var(--orange)';
+        const fieldsHtml = c.changed_fields
+          ? Object.entries(c.changed_fields).map(([f,v]) =>
+              `<div style="font-size:.75rem"><strong>${f}</strong>: <span style="color:var(--red)">${escHtml(String(v.old))}</span> → <span style="color:var(--green)">${escHtml(String(v.new))}</span></div>`
+            ).join('')
+          : '—';
+        html += `<tr>
+          <td><span style="color:${color};font-weight:600">${c.action}</span></td>
+          <td>${c.case_pk}</td>
+          <td>${escHtml(c.case_id||'')}</td>
+          <td class="wrap">${escHtml(c.case_name||'')}</td>
+          <td>${fieldsHtml}</td>
+        </tr>`;
+      }
+      html += '</tbody></table></div>';
+    } else {
+      html += '<div class="empty-state" style="margin-top:.5rem"><div class="icon">✅</div>No changes detected vs previous snapshot</div>';
+    }
+    content.innerHTML = html;
+  } catch(e) {
+    content.innerHTML = `<div class="empty-state">Error: ${escHtml(e.message)}</div>`;
+  }
+}
+
 loadDashboard();
 </script>
 </body>

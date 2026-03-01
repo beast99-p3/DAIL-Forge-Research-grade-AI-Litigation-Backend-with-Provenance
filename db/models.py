@@ -12,12 +12,13 @@ PROVENANCE  – change_log + citations
 """
 
 from datetime import datetime, date
-from typing import Optional, List
+from typing import Any, Optional, List
 
 from sqlalchemy import (
     Column, Integer, BigInteger, String, Text, Date, DateTime, Boolean,
     ForeignKey, Index, UniqueConstraint, JSON, func,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -51,6 +52,7 @@ class RawSchemaField(Base):
     is_unique: Mapped[Optional[str]] = mapped_column(Text)
     label: Mapped[Optional[str]] = mapped_column(Text)
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    row_checksum: Mapped[Optional[str]]  = mapped_column(String(64), nullable=True, index=True)
 
 
 # -- Data rows (from Case_Table / Document_Table / Secondary_Source_Coverage_Table)
@@ -87,6 +89,7 @@ class RawCase(Base):
     algorithm_list: Mapped[Optional[str]] = mapped_column(Text)
     harm_list: Mapped[Optional[str]] = mapped_column(Text)
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    row_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
 class RawDocument(Base):
@@ -102,6 +105,7 @@ class RawDocument(Base):
     document_date: Mapped[Optional[str]] = mapped_column(Text)
     url: Mapped[Optional[str]] = mapped_column(Text)
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    row_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
 class RawSecondarySource(Base):
@@ -118,6 +122,7 @@ class RawSecondarySource(Base):
     author: Mapped[Optional[str]] = mapped_column(Text)
     url: Mapped[Optional[str]] = mapped_column(Text)
     extra_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    row_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
 # ====================================================================
@@ -151,6 +156,15 @@ class Case(Base):
     # SHA-256 fingerprint of the best-known stable identifiers (docket_number,
     # court, caption, filing_date).  Enables safe merge/de-dup across imports.
     case_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
+    # Full-text search vector: weighted tsvector across case_name (A), plaintiff/
+    # defendant (B), court (C), summary/status/outcome/judge (D).
+    # Populated and maintained by the Postgres trigger added in migration 0006.
+    search_vector: Mapped[Optional[Any]] = mapped_column(TSVECTOR, nullable=True)
+
+    # Geo classification derived from court string (migration 0007 backfill).
+    state:   Mapped[Optional[str]] = mapped_column(String(8),  nullable=True, index=True)
+    circuit: Mapped[Optional[str]] = mapped_column(String(16), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -337,3 +351,157 @@ class PipelineRun(Base):
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     warning_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
+# ====================================================================
+# SEARCH EXTENSIONS  (migration 0007)
+# ====================================================================
+
+class SavedView(Base):
+    """
+    A named, persisted combination of filters + sort settings.
+
+    Researchers can save complex searches by name and share them as a URL:
+      GET /cases?view=privacy-california-2022
+    or fetch the filter dict directly:
+      GET /views/privacy-california-2022
+    """
+    __tablename__ = "saved_views"
+
+    id:          Mapped[int]            = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name:        Mapped[str]            = mapped_column(String(128), unique=True, nullable=False, index=True)
+    description: Mapped[Optional[str]]  = mapped_column(Text)
+    # Full filter state: {"court": "S.D.N.Y.", "status": "Open", "fts_query": "privacy", ...}
+    filters:     Mapped[Optional[dict]] = mapped_column(JSON, nullable=False, server_default="{}")
+    sort_by:     Mapped[str]            = mapped_column(String(64),  nullable=False, server_default="id")
+    sort_dir:    Mapped[str]            = mapped_column(String(4),   nullable=False, server_default="asc")
+    # Optional ordered list of column IDs to show in table view
+    columns:     Mapped[Optional[dict]] = mapped_column(JSON)
+    created_at:  Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at:  Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseLegalCitation(Base):
+    """
+    A legal citation string attached to a case record.
+
+    Allows ``GET /cases?cite=123+F.3d+456`` (trigram fuzzy match) and
+    exact reporter/volume/page lookups.
+
+    Examples of citation_text values:
+      "538 U.S. 343", "123 F.3d 456", "22 Cal. 4th 1153"
+    """
+    __tablename__ = "case_legal_citations"
+
+    id:            Mapped[int]           = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    case_id:       Mapped[int]           = mapped_column(
+        BigInteger, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    citation_text: Mapped[str]           = mapped_column(Text, nullable=False)
+    reporter:      Mapped[Optional[str]] = mapped_column(String(32))   # "F.3d", "U.S."
+    volume:        Mapped[Optional[int]] = mapped_column(Integer)
+    page:          Mapped[Optional[int]] = mapped_column(Integer)
+    year:          Mapped[Optional[int]] = mapped_column(Integer)
+    created_at:    Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    case: Mapped["Case"] = relationship()
+
+
+# ====================================================================
+# INCREMENTAL DELTA LOAD  (migration 0008)
+# ====================================================================
+
+class RawDeltaLog(Base):
+    """
+    Per-row provenance log for the incremental / delta load.
+
+    Every time `load_all_raw_delta` runs, one row is written here for
+    EACH Excel row processed, recording whether it was:
+      'insert'  – brand-new row
+      'update'  – row existed but at least one field changed
+      'skip'    – row existed and all fields are identical (checksum match)
+    """
+    __tablename__ = "raw_delta_log"
+
+    id:             Mapped[int]            = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id:         Mapped[str]            = mapped_column(String(64),  nullable=False, index=True)
+    source_file:    Mapped[str]            = mapped_column(String(128), nullable=False, index=True)
+    table_name:     Mapped[str]            = mapped_column(String(64),  nullable=False)
+    row_number:     Mapped[int]            = mapped_column(Integer,     nullable=False)
+    raw_row_id:     Mapped[Optional[int]]  = mapped_column(BigInteger,  nullable=True)
+    action:         Mapped[str]            = mapped_column(String(16),  nullable=False, index=True)
+    checksum_old:   Mapped[Optional[str]]  = mapped_column(String(64))
+    checksum_new:   Mapped[Optional[str]]  = mapped_column(String(64))
+    # {field: {"old": ..., "new": ...}} – only populated for 'update' actions
+    changed_fields: Mapped[Optional[dict]] = mapped_column(JSON)
+    logged_at:      Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ====================================================================
+# DATA VERSIONING / SNAPSHOTS  (migration 0009)
+# ====================================================================
+
+class CuratedSnapshot(Base):
+    """
+    A point-in-time snapshot of the entire curated (cases) layer.
+
+    Taken automatically at the end of every successful pipeline run, and
+    on-demand via `POST /snapshots`.  Enables:
+      - Reproducibility: researchers can cite "DAIL as of 2026-01-01"
+      - Diff: `GET /snapshots/{id}/diff` shows exactly what changed
+      - Rollback reference: compare current state to any past snapshot
+    """
+    __tablename__ = "curated_snapshots"
+
+    id:           Mapped[int]           = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    run_id:       Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    label:        Mapped[str]           = mapped_column(String(128), nullable=False)
+    description:  Mapped[Optional[str]] = mapped_column(Text)
+    taken_at:     Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    case_count:   Mapped[int]           = mapped_column(Integer, nullable=False, server_default="0")
+    doc_count:    Mapped[int]           = mapped_column(Integer, nullable=False, server_default="0")
+    source_count: Mapped[int]           = mapped_column(Integer, nullable=False, server_default="0")
+    tag_count:    Mapped[int]           = mapped_column(Integer, nullable=False, server_default="0")
+    is_auto:      Mapped[bool]          = mapped_column(Boolean, nullable=False, server_default="false")
+
+    cases: Mapped[List["SnapshotCase"]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan"
+    )
+
+
+class SnapshotCase(Base):
+    """
+    A frozen copy of one Case row (+ its tags) inside a CuratedSnapshot.
+
+    Storing denormalised tag_values JSON avoids a multi-table join when
+    computing per-field diffs between snapshots.
+    """
+    __tablename__ = "snapshot_cases"
+
+    id:           Mapped[int]           = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    snapshot_id:  Mapped[int]           = mapped_column(
+        BigInteger, ForeignKey("curated_snapshots.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Original PK in the live cases table (not a hard FK – this is a frozen copy)
+    case_pk:      Mapped[int]           = mapped_column(BigInteger, nullable=False, index=True)
+    case_id:      Mapped[Optional[str]] = mapped_column(String(64))
+    case_name:    Mapped[Optional[str]] = mapped_column(Text)
+    court:        Mapped[Optional[str]] = mapped_column(Text)
+    filing_date:  Mapped[Optional[date]]= mapped_column(Date)
+    closing_date: Mapped[Optional[date]]= mapped_column(Date)
+    case_status:  Mapped[Optional[str]] = mapped_column(String(64))
+    case_outcome: Mapped[Optional[str]] = mapped_column(String(128))
+    case_type:    Mapped[Optional[str]] = mapped_column(String(128))
+    plaintiff:    Mapped[Optional[str]] = mapped_column(Text)
+    defendant:    Mapped[Optional[str]] = mapped_column(Text)
+    judge:        Mapped[Optional[str]] = mapped_column(Text)
+    summary:      Mapped[Optional[str]] = mapped_column(Text)
+    is_stub:      Mapped[Optional[bool]]= mapped_column(Boolean)
+    state:        Mapped[Optional[str]] = mapped_column(String(8))
+    circuit:      Mapped[Optional[str]] = mapped_column(String(16))
+    # [{tag_type, value}] – denormalised for diff speed
+    tag_values:   Mapped[Optional[list]]= mapped_column(JSON)
+    # SHA-256 of all above fields – enables O(n) changed-case detection
+    row_checksum: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
+    snapshot: Mapped["CuratedSnapshot"] = relationship(back_populates="cases")

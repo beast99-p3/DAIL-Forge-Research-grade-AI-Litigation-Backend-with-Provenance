@@ -16,6 +16,8 @@ from api.routes_research import router as research_router
 from api.routes_curation import router as curation_router
 from api.routes_pipeline import router as pipeline_router
 from api.routes_stats import router as stats_router
+from api.routes_views import router as views_router
+from api.routes_snapshots import router as snapshots_router
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -144,6 +146,8 @@ app.include_router(research_router)
 app.include_router(curation_router)
 app.include_router(pipeline_router)
 app.include_router(stats_router)
+app.include_router(views_router)
+app.include_router(snapshots_router)
 
 # Serve static assets (CSS, JS, images if any)
 if STATIC_DIR.exists():
