@@ -1353,6 +1353,20 @@ async function executeFtsSearch(q) {
 async function executeSearch(query) {
   const params = parseNaturalLanguageQuery(query);
   
+  // Show what the parser understood
+  const filterParts = [];
+  if (params.fts_query)  filterParts.push(`text: "${params.fts_query}"`);
+  if (params.court)      filterParts.push(`court: ${params.court}`);
+  if (params.status)     filterParts.push(`status: ${params.status}`);
+  if (params.outcome)    filterParts.push(`outcome: ${params.outcome}`);
+  if (params.state)      filterParts.push(`state: ${params.state}`);
+  if (params.circuit)    filterParts.push(`circuit: ${params.circuit}`);
+  if (params.date_from)  filterParts.push(`from: ${params.date_from}`);
+  if (params.date_to)    filterParts.push(`to: ${params.date_to}`);
+  if (filterParts.length) {
+    terminalPrint(`<span style="color:var(--text2);font-size:.8rem">Filters: ${filterParts.join(' · ')}</span>`);
+  }
+  
   try {
     const data = await api(`/cases${qs(params)}`);
     lastQueryResults = data;
@@ -1399,68 +1413,99 @@ async function executeSearch(query) {
 
 function parseNaturalLanguageQuery(query) {
   const params = { page: 1, page_size: 10 };
-  const lower = query.toLowerCase();
-  
-  // Extract court
-  const courtMatch = lower.match(/(?:in|at|from)\s+([\w\s]+?court)/i);
-  if (courtMatch) params.court = courtMatch[1].trim();
-  
-  // Extract status
-  const statusMatch = lower.match(/(?:status|with status)\s+(?:is\s+)?(\w+)/i);
-  if (statusMatch) params.status = statusMatch[1];
-  
-  // Extract outcome
-  const outcomeMatch = lower.match(/(?:outcome|with outcome)\s+(?:is\s+)?(\w+)/i);
-  if (outcomeMatch) params.outcome = outcomeMatch[1];
-  
-  // Extract dates
-  const dateFromMatch = lower.match(/(?:after|from|since)\s+(\d{4}(?:-\d{2}-\d{2})?)/);
-  if (dateFromMatch) params.date_from = dateFromMatch[1].length === 4 ? `${dateFromMatch[1]}-01-01` : dateFromMatch[1];
-  
-  const dateToMatch = lower.match(/(?:before|until|to)\s+(\d{4}(?:-\d{2}-\d{2})?)/);
-  if (dateToMatch) params.date_to = dateToMatch[1].length === 4 ? `${dateToMatch[1]}-12-31` : dateToMatch[1];
-  
-  // Extract keyword
-  const keywordPatterns = [
-    /(?:about|regarding|concerning)\s+([^,\n]+?)(?:\s+(?:in|at|from|after|before|with)|$)/i,
-    /(?:search|find|show|list|get)\s+(?:cases?\s+)?(?:about\s+)?([^,\n]+?)(?:\s+(?:in|at|from|after|before|with)|$)/i,
+  const lower = query.toLowerCase().trim();
+
+  // We'll strip matched phrases from a working copy to derive the keyword.
+  let remaining = lower;
+
+  // Helper: strip a regex match from the remaining text
+  function strip(re) {
+    remaining = remaining.replace(re, ' ');
+  }
+
+  // ── 1. Extract court (e.g. "in district court", "from supreme court") ──
+  const courtRe = /\b(?:in|at|from)\s+([\w\s]+?court)\b/i;
+  const courtMatch = lower.match(courtRe);
+  if (courtMatch) { params.court = courtMatch[1].trim(); strip(courtRe); }
+
+  // ── 2. Extract status (e.g. "with status active", "status is open") ──
+  const statusRe = /\b(?:with\s+)?status\s+(?:is\s+)?(\w+)/i;
+  const statusMatch = lower.match(statusRe);
+  if (statusMatch) { params.status = statusMatch[1]; strip(statusRe); }
+
+  // ── 3. Extract outcome ──
+  const outcomeRe = /\b(?:with\s+)?outcome\s+(?:is\s+)?(\w+)/i;
+  const outcomeMatch = lower.match(outcomeRe);
+  if (outcomeMatch) { params.outcome = outcomeMatch[1]; strip(outcomeRe); }
+
+  // ── 4. Extract dates ──
+  // "in YEAR" → full year range
+  const inYearRe = /\bin\s+(\d{4})\b/;
+  const inYearMatch = lower.match(inYearRe);
+  if (inYearMatch) {
+    params.date_from = `${inYearMatch[1]}-01-01`;
+    params.date_to   = `${inYearMatch[1]}-12-31`;
+    strip(inYearRe);
+  }
+
+  // "after/from/since YEAR" or "after YYYY-MM-DD"
+  const dateFromRe = /\b(?:after|from|since|filed\s+after|filed\s+from|filed\s+since)\s+(\d{4}(?:-\d{2}-\d{2})?)\b/;
+  const dateFromMatch = lower.match(dateFromRe);
+  if (dateFromMatch) {
+    params.date_from = dateFromMatch[1].length === 4 ? `${dateFromMatch[1]}-01-01` : dateFromMatch[1];
+    strip(dateFromRe);
+  }
+
+  // "before/until/to YEAR"
+  const dateToRe = /\b(?:before|until|to|filed\s+before)\s+(\d{4}(?:-\d{2}-\d{2})?)\b/;
+  const dateToMatch = lower.match(dateToRe);
+  if (dateToMatch) {
+    params.date_to = dateToMatch[1].length === 4 ? `${dateToMatch[1]}-12-31` : dateToMatch[1];
+    strip(dateToRe);
+  }
+
+  // ── 5. Extract location → state / circuit / court ──
+  const locationMap = [
+    { re: /\b(?:9th|ninth)\s+circuit\b/i,   param: 'circuit', value: '9th' },
+    { re: /\b(?:2nd|second)\s+circuit\b/i,   param: 'circuit', value: '2nd' },
+    { re: /\b(?:3rd|third)\s+circuit\b/i,    param: 'circuit', value: '3rd' },
+    { re: /\b(?:5th|fifth)\s+circuit\b/i,    param: 'circuit', value: '5th' },
+    { re: /\b(?:7th|seventh)\s+circuit\b/i,  param: 'circuit', value: '7th' },
+    { re: /\b(?:11th|eleventh)\s+circuit\b/i,param: 'circuit', value: '11th' },
+    { re: /\b(\d+)(?:st|nd|rd|th)\s+circuit\b/i, param: 'circuit', valueFn: m => m[1] },
+    { re: /\bcalifornia\b/i,  param: 'state', value: 'CA' },
+    { re: /\bnew\s+york\b/i,  param: 'state', value: 'NY' },
+    { re: /\btexas\b/i,       param: 'state', value: 'TX' },
+    { re: /\bflorida\b/i,     param: 'state', value: 'FL' },
+    { re: /\billinois\b/i,    param: 'state', value: 'IL' },
+    { re: /\bfederal\b/i,     param: 'court', value: 'federal' },
   ];
-  
-  for (const pattern of keywordPatterns) {
-    const match = query.match(pattern);
-    if (match && match[1]) {
-      const kw = match[1].trim();
-      if (kw && !kw.match(/^\d{4}/) && kw.length > 2) {
-        // Always route to fts_query for ranking; websearch_to_tsquery handles simple words too
-        params.fts_query = kw;
-        break;
-      }
+  for (const loc of locationMap) {
+    const m = lower.match(loc.re);
+    if (m && !params[loc.param]) {
+      params[loc.param] = loc.valueFn ? loc.valueFn(m) : loc.value;
+      strip(loc.re);
     }
   }
-  
-  // Specific location keywords → use state/circuit params instead of overwriting court
-  if (/california|ca\b/i.test(lower) && !params.state) params.state = 'CA';
-  if (/9th circuit|ninth circuit/i.test(lower) && !params.circuit) params.circuit = '9th';
-  if (/federal/i.test(lower) && !params.court) params.court = 'federal';
-  if (/district/i.test(lower) && !params.court) params.court = 'district';
-  
-  // Tag extraction
-  const tagPatterns = {
-    privacy: 'privacy',
-    'facial recognition': 'facial recognition',
-    'employment': 'employment',
-    'discrimination': 'discrimination',
-    'generative ai': 'generative',
-    'algorithm': 'algorithm',
-  };
-  
-  for (const [pattern, value] of Object.entries(tagPatterns)) {
-    if (lower.includes(pattern)) {
-      params.fts_query = params.fts_query || value;
-      break;
-    }
+  // Bare 2-letter state code after "in" (e.g. "in CA")
+  if (!params.state) {
+    const stateRe = /\bin\s+([A-Z]{2})\b/;
+    const stateMatch = query.match(stateRe);
+    if (stateMatch) { params.state = stateMatch[1]; strip(/\bin\s+[a-z]{2}\b/i); }
   }
-  
+
+  // ── 6. Derive keyword from whatever is left ──
+  // Strip command verbs and filler words
+  strip(/\b(?:search|find|show|list|get|display|give\s+me|pull\s+up)\b/gi);
+  strip(/\b(?:cases?|about|regarding|concerning|involving|related\s+to|with|filed|the|for|all|me|any|some)\b/gi);
+  strip(/\b(?:in|at|from)\b/gi);  // leftover prepositions
+  // Collapse whitespace and trim
+  const keyword = remaining.replace(/\s+/g, ' ').trim();
+
+  if (keyword && keyword.length > 1 && !/^\d{4}$/.test(keyword)) {
+    params.fts_query = keyword;
+  }
+
   return params;
 }
 
