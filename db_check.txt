@@ -1,0 +1,4 @@
+﻿ 17      | {"Case_Number": "5", "court": "Court grants TRO", "document": "Court grants TRO"}
+ 18      | {"Case_Number": "5", "court": "Court grants Preliminary Injunction", "document": "Court grants Preliminary Injunction"}
+ 19      | {"Case_Number": "5", "court": "Order denying Idaho Department of Health and Welfare's Motion to Inform Plaintiff's their home-care service budgets have been reduced", "cite_or_reference": "2012 U.S. Dist. LEXIS 108945 (Aug. 2, 2012)", "document": "Order denying Idaho Department of Health and Welfare's Motion to Inform Plaintiff's their home-care service budgets have been reduced"}
+

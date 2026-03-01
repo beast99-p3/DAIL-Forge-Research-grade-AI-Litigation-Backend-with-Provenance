@@ -378,8 +378,12 @@ async def export_cases_csv(
     outcome: Optional[str] = None,
     keyword: Optional[str] = None,
     fts_query: Optional[str] = None,
+    is_stub: Optional[bool] = Query(None, description="Filter by stub status"),
+    state: Optional[str] = Query(None, description="2-letter US state abbreviation"),
+    circuit: Optional[str] = Query(None, description="Circuit label"),
+    cite: Optional[str] = Query(None, description="Legal citation fragment"),
 ):
-    stmt = _case_query(tag_type, tag_value, court, date_from, date_to, status, outcome, keyword, fts_query)
+    stmt = _case_query(tag_type, tag_value, court, date_from, date_to, status, outcome, keyword, fts_query, is_stub, state, circuit, cite)
     if fts_query:
         tsq = func.websearch_to_tsquery("english", fts_query)
         stmt = stmt.order_by(func.ts_rank_cd(Case.search_vector, tsq).desc())

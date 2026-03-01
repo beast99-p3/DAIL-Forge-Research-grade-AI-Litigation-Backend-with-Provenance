@@ -204,6 +204,9 @@ class Case(Base):
     caption_history: Mapped[List["CaseCaptionHistory"]] = relationship(
         back_populates="case", cascade="all, delete-orphan"
     )
+    legal_citations: Mapped[List["CaseLegalCitation"]] = relationship(
+        back_populates="case", cascade="all, delete-orphan"
+    )
 
 
 class Tag(Base):
@@ -399,7 +402,7 @@ class SavedView(Base):
     sort_by:     Mapped[str]            = mapped_column(String(64),  nullable=False, server_default="id")
     sort_dir:    Mapped[str]            = mapped_column(String(4),   nullable=False, server_default="asc")
     # Optional ordered list of column IDs to show in table view
-    columns:     Mapped[Optional[dict]] = mapped_column(JSON)
+    columns:     Mapped[Optional[list]] = mapped_column(JSON)
     created_at:  Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at:  Mapped[datetime]       = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -427,7 +430,7 @@ class CaseLegalCitation(Base):
     year:          Mapped[Optional[int]] = mapped_column(Integer)
     created_at:    Mapped[datetime]      = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    case: Mapped["Case"] = relationship()
+    case: Mapped["Case"] = relationship(back_populates="legal_citations")
 
 
 # ====================================================================

@@ -1,0 +1,26 @@
+﻿docker : INFO: Processing 876 cases
+At line:1 char:118
++ ... se_data.py; docker exec tai2026-api-1 python scripts/fix_case_data.py ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO: Processing 876 cases:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO: ============================================================
+INFO: FIX RESULTS:
+INFO: ============================================================
+INFO:   court_from_url            427
+INFO:   court_cleared             138
+INFO:   court_kept                219
+INFO:   name_from_sources         5
+INFO:   name_from_docket_url      0
+INFO:   name_from_headline        0
+INFO:   name_kept_generic         579
+INFO:   marked_as_stub            0
+INFO:   marked_as_real            876
+INFO: 
+INFO: FINAL STATE:
+INFO:   Total cases:       876
+INFO:   Real cases:        876
+INFO:   Stubs:             0
+INFO:   With valid court:  646
+INFO:   Generic names:     579

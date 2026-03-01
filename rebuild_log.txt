@@ -1,0 +1,85 @@
+﻿docker-compose : time="2026-02-28T21:05:10-05:00" level=warning msg="C:\\MS(USA)\\Hackathons\\TAI 
+2026\\docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential 
+confusion"
+At line:1 char:62
++ ... 6'; docker-compose down -v; docker-compose up --build -d 2>&1 | Out-F ...
++                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (time="2026-02-2...tial confusion":String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [api internal] load build definition from Dockerfile
+#1 transferring dockerfile: 339B 0.0s done
+#1 DONE 0.1s
+
+#2 [api internal] load metadata for docker.io/library/python:3.11-slim
+#2 ...
+
+#3 [api auth] library/python:pull token for registry-1.docker.io
+#3 DONE 0.0s
+
+#2 [api internal] load metadata for docker.io/library/python:3.11-slim
+#2 DONE 1.0s
+
+#4 [api internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [api internal] load build context
+#5 ...
+
+#6 [api 1/6] FROM docker.io/library/python:3.11-slim@sha256:c8271b1f627d0068857dce5b53e14a9558603b527e46f1f901722f935b786a39
+#6 resolve docker.io/library/python:3.11-slim@sha256:c8271b1f627d0068857dce5b53e14a9558603b527e46f1f901722f935b786a39 0.1s done
+#6 DONE 0.1s
+
+#5 [api internal] load build context
+#5 transferring context: 325.19kB 0.3s done
+#5 DONE 0.3s
+
+#7 [api 4/6] COPY requirements.txt .
+#7 CACHED
+
+#8 [api 2/6] WORKDIR /app
+#8 CACHED
+
+#9 [api 3/6] RUN apt-get update && apt-get install -y --no-install-recommends     gcc libpq-dev &&     rm -rf /var/lib/apt/lists/*
+#9 CACHED
+
+#10 [api 5/6] RUN pip install --no-cache-dir -r requirements.txt
+#10 CACHED
+
+#11 [api 6/6] COPY . .
+#11 DONE 1.8s
+
+#12 [api] exporting to image
+#12 exporting layers
+#12 exporting layers 0.5s done
+#12 exporting manifest sha256:41064e70737e6dead288ff8adbd7d950b4b4a5c9543819a35983dc845c58f1e1 0.0s done
+#12 exporting config sha256:c898110ac14906ec9d60c9433cf1e88b8e373027b0bb864f63db30c716522dc3 0.0s done
+#12 exporting attestation manifest sha256:18c679514ae77313210848fb1ccd545eb9e226f254a818142780e45015bb77f6 0.0s done
+#12 exporting manifest list sha256:98f1a2b2f4a7546cefd00fff0ca80e9eaeedbb1107010a4239fad213b324bb45
+#12 exporting manifest list sha256:98f1a2b2f4a7546cefd00fff0ca80e9eaeedbb1107010a4239fad213b324bb45 0.0s done
+#12 naming to docker.io/library/tai2026-api:latest done
+#12 unpacking to docker.io/library/tai2026-api:latest
+#12 unpacking to docker.io/library/tai2026-api:latest 0.6s done
+#12 DONE 1.4s
+
+#13 [api] resolving provenance for metadata file
+#13 DONE 0.1s
+time="2026-02-28T21:05:11-05:00" level=warning msg="current commit information was not captured by the build" 
+error="git was not found in the system: exec: \"git.exe\": executable file not found in %PATH%"
+ Network tai2026_default  Creating
+ Network tai2026_default  Created
+ Volume "tai2026_pgdata"  Creating
+ Volume "tai2026_pgdata"  Created
+ Container tai2026-db-1  Creating
+ Container tai2026-db-1  Created
+ Container tai2026-api-1  Creating
+ Container tai2026-api-1  Created
+ Container tai2026-db-1  Starting
+ Container tai2026-db-1  Started
+ Container tai2026-db-1  Waiting
+ Container tai2026-db-1  Healthy
+ Container tai2026-api-1  Starting
+ Container tai2026-api-1  Started

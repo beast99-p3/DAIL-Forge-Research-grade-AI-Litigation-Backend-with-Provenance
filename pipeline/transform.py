@@ -357,6 +357,13 @@ def enrich_cases_from_raw_documents(
         # Fuzzy-map extra_fields keys → canonical CASE_ALIASES names
         col_map = build_column_map(list(merged.keys()), CASE_ALIASES)
 
+        # IMPORTANT: The "court" key in raw_document extra_fields actually
+        # contains document descriptions ("Complaint", "Motion to Dismiss"),
+        # NOT real court names.  Exclude it from scalar mapping to prevent
+        # polluting Case.court with garbage data.
+        # Court data should come from CourtListener URL parsing instead.
+        _SKIP_EXTRA_SCALARS = {"court"}
+
         changed_fields: Dict[str, Any] = {}
         tag_fields: Dict[str, str] = {}
 
@@ -369,6 +376,8 @@ def enrich_cases_from_raw_documents(
             if canonical in _TAG_CANONICAL:
                 tag_fields[canonical] = val
                 continue
+            if canonical in _SKIP_EXTRA_SCALARS:
+                continue  # skip unreliable extra_fields
             if canonical in _CASE_DATES:
                 parsed = parse_date(val)
                 if parsed and getattr(case, canonical) is None:
@@ -533,6 +542,8 @@ def transform_all(session: Session, run_id: Optional[str] = None) -> dict[str, i
     4. Transform documents
     5. Transform secondary sources
     6. Transform dockets
+    7. Extract courts from CourtListener URLs
+    8. Extract case names from URL slugs and source titles
     """
     return {
         "real_cases": transform_cases(session, run_id=run_id),
@@ -541,4 +552,224 @@ def transform_all(session: Session, run_id: Optional[str] = None) -> dict[str, i
         "documents": transform_documents(session),
         "secondary_sources": transform_secondary_sources(session),
         "dockets": transform_dockets(session),
+        "courts_extracted": extract_courts_from_urls(session),
+        "names_extracted": extract_names_from_urls_and_sources(session),
     }
+
+
+# ── Post-transform enrichment from URLs ─────────────────────────────
+
+# PACER court codes → human-readable names
+_COURT_CODE_MAP = {
+    "akd": "U.S. District Court, District of Alaska",
+    "almd": "U.S. District Court, Middle District of Alabama",
+    "alnd": "U.S. District Court, Northern District of Alabama",
+    "alsd": "U.S. District Court, Southern District of Alabama",
+    "ared": "U.S. District Court, Eastern District of Arkansas",
+    "arwd": "U.S. District Court, Western District of Arkansas",
+    "azd": "U.S. District Court, District of Arizona",
+    "cacd": "U.S. District Court, Central District of California",
+    "caed": "U.S. District Court, Eastern District of California",
+    "cand": "U.S. District Court, Northern District of California",
+    "casd": "U.S. District Court, Southern District of California",
+    "cod": "U.S. District Court, District of Colorado",
+    "ctd": "U.S. District Court, District of Connecticut",
+    "dcd": "U.S. District Court, District of Columbia",
+    "ded": "U.S. District Court, District of Delaware",
+    "flmd": "U.S. District Court, Middle District of Florida",
+    "flnd": "U.S. District Court, Northern District of Florida",
+    "flsd": "U.S. District Court, Southern District of Florida",
+    "gamd": "U.S. District Court, Middle District of Georgia",
+    "gand": "U.S. District Court, Northern District of Georgia",
+    "gasd": "U.S. District Court, Southern District of Georgia",
+    "hid": "U.S. District Court, District of Hawaii",
+    "iasd": "U.S. District Court, Southern District of Iowa",
+    "iand": "U.S. District Court, Northern District of Iowa",
+    "idd": "U.S. District Court, District of Idaho",
+    "ilcd": "U.S. District Court, Central District of Illinois",
+    "ilnd": "U.S. District Court, Northern District of Illinois",
+    "ilsd": "U.S. District Court, Southern District of Illinois",
+    "innd": "U.S. District Court, Northern District of Indiana",
+    "insd": "U.S. District Court, Southern District of Indiana",
+    "ksd": "U.S. District Court, District of Kansas",
+    "kyed": "U.S. District Court, Eastern District of Kentucky",
+    "kywd": "U.S. District Court, Western District of Kentucky",
+    "laed": "U.S. District Court, Eastern District of Louisiana",
+    "lamd": "U.S. District Court, Middle District of Louisiana",
+    "lawd": "U.S. District Court, Western District of Louisiana",
+    "mad": "U.S. District Court, District of Massachusetts",
+    "mdd": "U.S. District Court, District of Maryland",
+    "med": "U.S. District Court, District of Maine",
+    "mied": "U.S. District Court, Eastern District of Michigan",
+    "miwd": "U.S. District Court, Western District of Michigan",
+    "mnd": "U.S. District Court, District of Minnesota",
+    "moed": "U.S. District Court, Eastern District of Missouri",
+    "mowd": "U.S. District Court, Western District of Missouri",
+    "msnd": "U.S. District Court, Northern District of Mississippi",
+    "mssd": "U.S. District Court, Southern District of Mississippi",
+    "mtd": "U.S. District Court, District of Montana",
+    "nced": "U.S. District Court, Eastern District of North Carolina",
+    "ncmd": "U.S. District Court, Middle District of North Carolina",
+    "ncwd": "U.S. District Court, Western District of North Carolina",
+    "ndd": "U.S. District Court, District of North Dakota",
+    "ned": "U.S. District Court, District of Nebraska",
+    "nhd": "U.S. District Court, District of New Hampshire",
+    "njd": "U.S. District Court, District of New Jersey",
+    "nmd": "U.S. District Court, District of New Mexico",
+    "nvd": "U.S. District Court, District of Nevada",
+    "nyed": "U.S. District Court, Eastern District of New York",
+    "nynd": "U.S. District Court, Northern District of New York",
+    "nysd": "U.S. District Court, Southern District of New York",
+    "nywd": "U.S. District Court, Western District of New York",
+    "ohnd": "U.S. District Court, Northern District of Ohio",
+    "ohsd": "U.S. District Court, Southern District of Ohio",
+    "oked": "U.S. District Court, Eastern District of Oklahoma",
+    "oknd": "U.S. District Court, Northern District of Oklahoma",
+    "okwd": "U.S. District Court, Western District of Oklahoma",
+    "ord": "U.S. District Court, District of Oregon",
+    "paed": "U.S. District Court, Eastern District of Pennsylvania",
+    "pamd": "U.S. District Court, Middle District of Pennsylvania",
+    "pawd": "U.S. District Court, Western District of Pennsylvania",
+    "prd": "U.S. District Court, District of Puerto Rico",
+    "rid": "U.S. District Court, District of Rhode Island",
+    "scd": "U.S. District Court, District of South Carolina",
+    "sdd": "U.S. District Court, District of South Dakota",
+    "tned": "U.S. District Court, Eastern District of Tennessee",
+    "tnmd": "U.S. District Court, Middle District of Tennessee",
+    "tnwd": "U.S. District Court, Western District of Tennessee",
+    "txed": "U.S. District Court, Eastern District of Texas",
+    "txnd": "U.S. District Court, Northern District of Texas",
+    "txsd": "U.S. District Court, Southern District of Texas",
+    "txwd": "U.S. District Court, Western District of Texas",
+    "utd": "U.S. District Court, District of Utah",
+    "vaed": "U.S. District Court, Eastern District of Virginia",
+    "vawd": "U.S. District Court, Western District of Virginia",
+    "vtd": "U.S. District Court, District of Vermont",
+    "waed": "U.S. District Court, Eastern District of Washington",
+    "wawd": "U.S. District Court, Western District of Washington",
+    "wied": "U.S. District Court, Eastern District of Wisconsin",
+    "wiwd": "U.S. District Court, Western District of Wisconsin",
+    "wvnd": "U.S. District Court, Northern District of West Virginia",
+    "wvsd": "U.S. District Court, Southern District of West Virginia",
+    "wyd": "U.S. District Court, District of Wyoming",
+    "ca1": "U.S. Court of Appeals, First Circuit",
+    "ca2": "U.S. Court of Appeals, Second Circuit",
+    "ca3": "U.S. Court of Appeals, Third Circuit",
+    "ca4": "U.S. Court of Appeals, Fourth Circuit",
+    "ca5": "U.S. Court of Appeals, Fifth Circuit",
+    "ca6": "U.S. Court of Appeals, Sixth Circuit",
+    "ca7": "U.S. Court of Appeals, Seventh Circuit",
+    "ca8": "U.S. Court of Appeals, Eighth Circuit",
+    "ca9": "U.S. Court of Appeals, Ninth Circuit",
+    "ca10": "U.S. Court of Appeals, Tenth Circuit",
+    "ca11": "U.S. Court of Appeals, Eleventh Circuit",
+    "cadc": "U.S. Court of Appeals, D.C. Circuit",
+    "cafc": "U.S. Court of Appeals, Federal Circuit",
+}
+
+_VALID_COURT_RE = re.compile(
+    r"(district\s+court|circuit\s+court|court\s+of\s+appeals|supreme\s+court"
+    r"|superior\s+court|county\s+court|bankruptcy\s+court|federal\s+court"
+    r"|court\s+of\s+claims|court\s+of\s+common\s+pleas"
+    r"|[NSEWMC]\.?D\.?\s+\w)",
+    re.IGNORECASE,
+)
+
+
+def extract_courts_from_urls(session: Session) -> int:
+    """
+    Extract real court names from CourtListener URLs in documents and
+    secondary sources.  Also clears garbage court values (document
+    descriptions that leaked via extra_fields mapping).
+
+    Runs after documents/sources are created so URL data is available.
+    """
+    cases = session.query(Case).filter(Case.court.is_(None)).all()
+    if not cases:
+        logger.info("All cases already have courts – skipping URL extraction")
+        return 0
+
+    enriched = 0
+    for case in cases:
+        # Collect all URLs for this case
+        urls = [d.url for d in case.documents if d.url] + \
+               [s.url for s in case.secondary_sources if s.url]
+
+        for url in urls:
+            m = re.search(r"gov\.uscourts\.(\w+)\.", url)
+            if m:
+                code = m.group(1)
+                if code in _COURT_CODE_MAP:
+                    case.court = _COURT_CODE_MAP[code]
+                    enriched += 1
+                    break
+
+    session.commit()
+    logger.info("Extracted courts from URLs for %d cases", enriched)
+    return enriched
+
+
+def extract_names_from_urls_and_sources(session: Session) -> int:
+    """
+    Extract proper case names from CourtListener URL slugs and secondary
+    source titles for cases that still have generic placeholder names.
+    """
+    cases = session.query(Case).filter(
+        (Case.case_name.like("[Stub]%")) | (Case.case_name.like("AI Litigation Case%"))
+    ).all()
+    if not cases:
+        logger.info("No generic-named cases – skipping name extraction")
+        return 0
+
+    enriched = 0
+    for case in cases:
+        urls = [d.url for d in case.documents if d.url] + \
+               [s.url for s in case.secondary_sources if s.url]
+
+        new_name = None
+
+        # Strategy 1: CourtListener docket/opinion URL slugs
+        for url in urls:
+            m = re.search(r"/(docket|opinion)/\d+(?:/\d+)?/([\w-]+)/?", url)
+            if not m:
+                continue
+            slug = m.group(2)
+            parts = slug.split("-")
+            if len(parts) >= 3 and parts[0] == "in" and parts[1] == "re":
+                new_name = "In re " + " ".join(p.capitalize() for p in parts[2:])
+                break
+            if "v" in parts:
+                v_i = parts.index("v")
+                if v_i > 0 and v_i < len(parts) - 1:
+                    p1 = " ".join(p.capitalize() for p in parts[:v_i])
+                    p2 = " ".join(p.capitalize() for p in parts[v_i+1:])
+                    new_name = f"{p1} v. {p2}"
+                    break
+
+        # Strategy 2: Secondary source titles with "v." patterns
+        if not new_name:
+            for ss in case.secondary_sources:
+                t = ss.source_title or ""
+                m = re.search(
+                    r"([A-Z][A-Za-z\s.\'&,()\-]+?)\s+(?:v\.?s?\.?)\s+([A-Z][A-Za-z\s.\'&,()\-]+)",
+                    t,
+                )
+                if m:
+                    new_name = f"{m.group(1).strip()} v. {m.group(2).strip()}"
+                    break
+
+        # Strategy 3: Use first informative source title
+        if not new_name:
+            for ss in case.secondary_sources:
+                t = (ss.source_title or "").strip()
+                if t and len(t) > 15 and not t.startswith("http"):
+                    new_name = t[:120] if len(t) > 120 else t
+                    break
+
+        if new_name:
+            case.case_name = new_name
+            enriched += 1
+
+    session.commit()
+    logger.info("Extracted names for %d cases", enriched)
+    return enriched

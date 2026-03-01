@@ -8,6 +8,7 @@ import hashlib
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from db.models import Case, CaseTag, Tag, Citation, ChangeLog, CaseCaptionHistory
 from db.session import get_async_session
@@ -22,9 +23,25 @@ router = APIRouter(tags=["Curation (restricted write)"], dependencies=[Depends(r
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+def _case_to_out(c: Case) -> CaseOut:
+    """Convert ORM Case (with eager-loaded tags) to CaseOut schema."""
+    tags = [TagOut(id=ct.tag.id, tag_type=ct.tag.tag_type, value=ct.tag.value) for ct in c.tags]
+    return CaseOut(
+        id=c.id, case_id=c.case_id, case_name=c.case_name, court=c.court,
+        filing_date=c.filing_date, closing_date=c.closing_date,
+        case_status=c.case_status, case_outcome=c.case_outcome,
+        case_type=c.case_type, plaintiff=c.plaintiff, defendant=c.defendant,
+        judge=c.judge, summary=c.summary, is_stub=c.is_stub, tags=tags,
+        created_at=c.created_at, updated_at=c.updated_at,
+    )
+
 async def _get_case_or_404(session: AsyncSession, case_id: int) -> Case:
-    result = await session.execute(select(Case).filter(Case.id == case_id))
-    case = result.scalar_one_or_none()
+    result = await session.execute(
+        select(Case)
+        .options(selectinload(Case.tags).selectinload(CaseTag.tag))
+        .filter(Case.id == case_id)
+    )
+    case = result.unique().scalar_one_or_none()
     if not case:
         raise HTTPException(404, "Case not found")
     return case
@@ -122,7 +139,9 @@ async def update_case(
 
     await session.commit()
     await session.refresh(case)
-    return case
+    # Re-fetch with eager-loaded tags for proper CaseOut serialization
+    case = await _get_case_or_404(session, case_id)
+    return _case_to_out(case)
 
 
 # ── POST /cases/{case_id}/tags ───────────────────────────────────────
@@ -242,7 +261,9 @@ async def promote_stub_case(
 
     await session.commit()
     await session.refresh(case)
-    return case
+    # Re-fetch with eager-loaded tags for proper CaseOut serialization
+    case = await _get_case_or_404(session, case_id)
+    return _case_to_out(case)
 
 
 # ── POST /citations ──────────────────────────────────────────────────

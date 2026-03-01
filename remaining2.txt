@@ -1,0 +1,16 @@
+﻿  32 | [Stub] Case #127        | 
+ 112 | [Stub] Case #20         | 
+ 179 | [Stub] Case #260        | 
+ 250 | AI Litigation Case #324 | https://www.akingump.com/en/insights/blogs/ip-newsflash/court-dismisses-patent-claims-directed-to-intermittent-fault-detection-in-electrical-systems-for-aircrafts-as-ineligible-subject-matter-under-35-usc-101
+ 486 | [Stub] Case #54         | 
+ 497 | [Stub] Case #55         | 
+ 508 | [Stub] Case #56         | 
+ 211 | [Stub] Case #29         | 
+ 188 | AI Litigation Case #269 | https://www.teslarati.com/tesla-victorious-misleading-statement-suit-for-full-self-driving/#google_vignette
+ 418 | [Stub] Case #479        | 
+ 423 | [Stub] Case #483        | 
+ 301 | [Stub] Case #370        | 
+ 359 | [Stub] Case #422        | 
+ 363 | [Stub] Case #426        | 
+ 774 | [Stub] Case #8          | 
+

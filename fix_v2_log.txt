@@ -1,0 +1,41 @@
+﻿docker : INFO: Connected. Total cases: 876
+At line:1 char:124
++ ... data_v2.py; docker exec tai2026-api-1 python scripts/fix_case_data_v2 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO: Connected. Total cases: 876:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO: Applying 589 updates...
+INFO: Committed.
+INFO: Cases with court: 621
+INFO: Generic names remaining: 579
+INFO: ==================================================
+INFO:   court_from_url            427
+INFO:   court_cleared             162
+INFO:   court_kept                194
+INFO:   name_from_url_slug        0
+INFO:   name_from_source_vs       0
+INFO:   name_from_headline        0
+INFO:   name_kept_generic         579
+INFO: 
+INFO: Sample cases:
+INFO:   ID=1 | State v. Loomis | Supreme Court of Wisconsin
+INFO:   ID=2 | Jesse Beatson, Ewert v. Canada | (no court)
+INFO:   ID=3 | In re Clearview Ai Inc Consumer Privacy Litigation | (no court)
+INFO:   ID=4 | Gonzalez v. Google LLC | U.S. Supreme Court
+INFO:   ID=5 | In re Clearview Ai Inc Consumer Privacy Litigation | (no court)
+INFO:   ID=6 | [Stub] Case #103 | (no court)
+INFO:   ID=7 | AI Litigation Case #104 | (no court)
+INFO:   ID=8 | ACLU v. Clearview AI | Circuit Court of Cook County, Illinois
+INFO:   ID=9 | News publishers v. Cohere | (no court)
+INFO:   ID=10 | AI Litigation Case #107 | (no court)
+INFO:   ID=11 | AI Litigation Case #108 | (no court)
+INFO:   ID=12 | [Stub] Case #109 | (no court)
+INFO:   ID=13 | Doe v. GitHub, Inc. | N.D. Cal.
+INFO:   ID=14 | [Stub] Case #110 | Opinion of the Indiana Supreme Court
+INFO:   ID=15 | AI Litigation Case #111 | (no court)
+INFO:   ID=16 | AI Litigation Case #112 | (no court)
+INFO:   ID=17 | Reddit v. AI startup Anthropic | (no court)
+INFO:   ID=18 | Hollywood giants v. AI firm | Opinion of the Michigan Court of Appeals
+INFO:   ID=19 | Stable Diffusion Litigation (Andersen v. Stability AI) | N.D. Cal.
+INFO:   ID=20 | AI Litigation Case #116 | U.S. District Court, Northern District of Illinois

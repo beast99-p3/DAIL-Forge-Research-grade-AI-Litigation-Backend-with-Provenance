@@ -283,6 +283,7 @@ mark{background:rgba(255,167,38,.25);color:var(--orange);padding:0 .15rem;border
     </div>
     <div class="filter-group"><label>Court</label><input type="text" id="f-court" placeholder="e.g. district"></div>
     <div class="filter-group"><label>Status</label><input type="text" id="f-status" placeholder="e.g. open"></div>
+    <div class="filter-group"><label>Outcome</label><input type="text" id="f-outcome" placeholder="e.g. settled"></div>
     <div class="filter-group"><label>State <abbr class="fts-hint" title="2-letter US state abbreviation, e.g. CA">ⓘ</abbr></label><input type="text" id="f-state" placeholder="e.g. CA" maxlength="2"></div>
     <div class="filter-group"><label>Circuit <abbr class="fts-hint" title="Federal circuit, e.g. 9th or 2nd">ⓘ</abbr></label><input type="text" id="f-circuit" placeholder="e.g. 9th"></div>
     <div class="filter-group"><label>Citation <abbr class="fts-hint" title="Legal citation fragment (fuzzy), e.g. 538 U.S. 343">ⓘ</abbr></label><input type="text" id="f-cite" placeholder="e.g. 538 U.S. 343"></div>
@@ -681,6 +682,7 @@ async function searchCases(page = 1) {
     ...(kwVal  ? { keyword:   kwVal  } : {}),
     court:     document.getElementById('f-court').value,
     status:    document.getElementById('f-status').value,
+    outcome:   document.getElementById('f-outcome').value,
     state:     document.getElementById('f-state').value,
     circuit:   document.getElementById('f-circuit').value,
     cite:      document.getElementById('f-cite').value,
@@ -737,7 +739,7 @@ async function searchCases(page = 1) {
 }
 
 function resetFilters() {
-  ['f-keyword','f-fts','f-court','f-status','f-state','f-circuit','f-cite','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
+  ['f-keyword','f-fts','f-court','f-status','f-outcome','f-state','f-circuit','f-cite','f-tag-type','f-tag-value','f-date-from','f-date-to'].forEach(id => {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.selectedIndex = 0;
     else el.value = '';
@@ -752,6 +754,7 @@ function exportCSV() {
     ...(ftsVal ? { fts_query: ftsVal } : {}),
     court:     document.getElementById('f-court').value,
     status:    document.getElementById('f-status').value,
+    outcome:   document.getElementById('f-outcome').value,
     state:     document.getElementById('f-state').value,
     circuit:   document.getElementById('f-circuit').value,
     cite:      document.getElementById('f-cite').value,
@@ -771,6 +774,7 @@ async function loadFacets() {
     ...(ftsVal ? { fts_query: ftsVal } : {}),
     court:     document.getElementById('f-court').value,
     status:    document.getElementById('f-status').value,
+    outcome:   document.getElementById('f-outcome').value,
     state:     document.getElementById('f-state').value,
     circuit:   document.getElementById('f-circuit').value,
     cite:      document.getElementById('f-cite').value,
@@ -793,7 +797,7 @@ async function loadFacets() {
       ).join(' ');
       return `<div style="margin-bottom:.6rem"><strong style="color:var(--text2);font-size:.8rem;text-transform:uppercase">${label}</strong><br>${items}</div>`;
     };
-    const applyMap = { 'Court': 'f-court', 'Status': 'f-status', 'Outcome': null,
+    const applyMap = { 'Court': 'f-court', 'Status': 'f-status', 'Outcome': 'f-outcome',
                        'Year': 'f-date-from', 'Circuit': 'f-circuit', 'State': 'f-state', 'Tag Type': 'f-tag-type' };
     panel.innerHTML =
       renderSection('Court',   f.courts)   +
@@ -803,7 +807,7 @@ async function loadFacets() {
       renderSection('Circuit', f.circuits) +
       renderSection('State',   f.states)   +
       renderSection('Tag Type',f.tag_types) +
-      '<button class="btn btn-sm btn-secondary" onclick="document.getElementById(\"facets-panel\").style.display=\"none\"">Close facets</button>';
+      '<button class="btn btn-sm btn-secondary" onclick="document.getElementById(\'facets-panel\').style.display=\'none\'">Close facets</button>';
   } catch(e) {
     panel.innerHTML = `<div class="empty-state">Error loading facets: ${escHtml(e.message)}</div>`;
   }
@@ -811,9 +815,16 @@ async function loadFacets() {
 
 function applyFacet(dimension, value) {
   const map = {
-    'Court': 'f-court', 'Status': 'f-status', 'Circuit': 'f-circuit',
-    'State': 'f-state', 'Tag Type': 'f-tag-type',
+    'Court': 'f-court', 'Status': 'f-status', 'Outcome': 'f-outcome',
+    'Circuit': 'f-circuit', 'State': 'f-state', 'Tag Type': 'f-tag-type',
   };
+  if (dimension === 'Year') {
+    // Set date range to the selected year
+    document.getElementById('f-date-from').value = value + '-01-01';
+    document.getElementById('f-date-to').value = value + '-12-31';
+    searchCases(1);
+    return;
+  }
   const id = map[dimension];
   if (id) {
     const el = document.getElementById(id);
@@ -1427,11 +1438,11 @@ function parseNaturalLanguageQuery(query) {
     }
   }
   
-  // Specific location keywords
-  if (/california|ca\b/i.test(lower)) params.court = 'California';
-  if (/9th circuit|ninth circuit/i.test(lower)) params.court = '9th';
-  if (/federal/i.test(lower)) params.court = 'federal';
-  if (/district/i.test(lower)) params.court = 'district';
+  // Specific location keywords → use state/circuit params instead of overwriting court
+  if (/california|ca\b/i.test(lower) && !params.state) params.state = 'CA';
+  if (/9th circuit|ninth circuit/i.test(lower) && !params.circuit) params.circuit = '9th';
+  if (/federal/i.test(lower) && !params.court) params.court = 'federal';
+  if (/district/i.test(lower) && !params.court) params.court = 'district';
   
   // Tag extraction
   const tagPatterns = {

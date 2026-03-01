@@ -1,0 +1,11 @@
+﻿  32 | [Stub] Case #127        |        0 |         1
+ 112 | [Stub] Case #20         |        0 |         1
+ 179 | [Stub] Case #260        |        1 |         1
+ 250 | AI Litigation Case #324 |        1 |         1
+ 486 | [Stub] Case #54         |        1 |         0
+ 497 | [Stub] Case #55         |        1 |         0
+ 508 | [Stub] Case #56         |        1 |         0
+ 211 | [Stub] Case #29         |        1 |         1
+ 188 | AI Litigation Case #269 |        1 |         1
+ 418 | [Stub] Case #479        |        0 |         1
+

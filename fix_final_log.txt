@@ -1,0 +1,44 @@
+﻿docker : INFO: Connected. Total cases: 880
+At line:1 char:124
++ ... data_v2.py; docker exec tai2026-api-1 python scripts/fix_case_data_v2 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (INFO: Connected. Total cases: 880:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+INFO: Applying 538 updates...
+INFO: Committed.
+INFO: Cases with court: 502
+INFO: Generic names remaining: 237
+INFO: ==================================================
+INFO:   court_from_url            427
+INFO:   court_cleared             82
+INFO:   court_kept                75
+INFO:   name_from_url_slug        4
+INFO:   name_from_source_vs       0
+INFO:   name_from_headline        0
+INFO:   name_from_source_title    0
+INFO:   name_kept_generic         237
+INFO: 
+INFO: Sample cases:
+INFO:   ID=1 | Justine Hsu v. Tesla, Inc. | U.S. District Court, Eastern District of Michigan
+INFO:   ID=2 | Altman et al v. Caesars Entertainment, Inc. et al | U.S. District Court, Eastern District of New York
+INFO:   ID=3 | Gunza v. Brookdale Senior Living, Inc. | U.S. District Court, Southern District of New York
+INFO:   ID=4 | ANI Media PVT Ltd. v. Open AI Inc. | U.S. District Court, Northern District of California
+INFO:   ID=5 | UMG Recordings, Inc. et al. v. Suno, Inc. | (no court)
+INFO:   ID=6 | Kohls v. Bonta | U.S. District Court, Northern District of California
+INFO:   ID=7 | Huckabee v. Meta Platforms | U.S. District Court, Southern District of New York
+INFO:   ID=8 | In re OpenAI Inc. Copyright Infringement Litigation | U.S. District Court, Northern District of 
+California
+INFO:   ID=9 | Calderon v. Clearview AI, Inc. | (no court)
+INFO:   ID=10 | Carmine v. Macy's Retail Holdings, Inc | N.D. Ill.
+INFO:   ID=11 | Malenchik v. State | (no court)
+INFO:   ID=12 | State of Washington v. Flanigan et al | U.S. District Court, District of Massachusetts
+INFO:   ID=13 | People v. Wakefield | (no court)
+INFO:   ID=14 | Walters v. OpenAI, LLC | (no court)
+INFO:   ID=15 | Kadrey v. Meta Platforms, Inc. | U.S. District Court, Northern District of California
+INFO:   ID=16 | Faridian v. DoNotPay, Inc. | N.D. Cal.
+INFO:   ID=17 | Hall v. Clearview AI, Inc. | U.S. District Court, Southern District of California
+INFO:   ID=18 | Houston Federation of Teachers v. Houston Independent School District | U.S. District Court, District 
+of Idaho
+INFO:   ID=19 | Tewson v. DoNotPay | (no court)
+INFO:   ID=20 | Sabourin v. OpenAI, Inc. | U.S. District Court, Southern District of New York
